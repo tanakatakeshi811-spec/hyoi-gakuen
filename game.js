@@ -498,6 +498,16 @@ function actionTalk(npc){
     lines = TALK_LINES.kiryuu_line;
   } else if(npc.key==='janitor'){
     lines = TALK_LINES.janitor_line;
+  } else if(npc.key==='mio'){
+    lines = TALK_LINES.mio_line;
+  } else if(npc.key==='nayuta'){
+    lines = TALK_LINES.nayuta_line;
+  } else if(npc.key==='mei'){
+    lines = TALK_LINES.mei_line;
+  } else if(npc.key==='kenta'){
+    lines = TALK_LINES.kenta_line;
+  } else if(npc.key==='sakura'){
+    lines = TALK_LINES.sakura_line;
   } else if(npc.role==='teacher'){
     lines = TALK_LINES.teacher_warn;
   } else {
