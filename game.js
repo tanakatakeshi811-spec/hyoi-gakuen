@@ -89,10 +89,18 @@ function addObstacleBox(cx,cz,w,d,rotY,color){
   OBSTACLES.push({x:cx,z:cz,r:Math.max(w,d)/2+0.3});
 }
 function addTree(x,z){
-  const trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.35,0.45,2.2,8),LM(0x5a4028));
-  trunk.position.set(x,1.1,z); trunk.castShadow=true; scene.add(trunk);
-  const leaf=new THREE.Mesh(new THREE.SphereGeometry(1.6,10,8),LM(0x3f7a45));
-  leaf.position.set(x,2.9,z); leaf.castShadow=true; scene.add(leaf);
+  const model=makeTreeModel();
+  if(model){
+    model.position.set(x,0,z);
+    model.rotation.y=Math.random()*Math.PI*2;
+    scene.add(model);
+  } else {
+    // 念のためのフォールバック(モデル未読込時はプリミティブで代替)
+    const trunk=new THREE.Mesh(new THREE.CylinderGeometry(0.35,0.45,2.2,8),LM(0x5a4028));
+    trunk.position.set(x,1.1,z); trunk.castShadow=true; scene.add(trunk);
+    const leaf=new THREE.Mesh(new THREE.SphereGeometry(1.6,10,8),LM(0x3f7a45));
+    leaf.position.set(x,2.9,z); leaf.castShadow=true; scene.add(leaf);
+  }
   OBSTACLES.push({x:x,z:z,r:0.9});
 }
 function addBench(x,z,rotY){
@@ -1198,7 +1206,8 @@ function clearSave(){ try{ localStorage.removeItem(SAVE_KEY); }catch(e){} }
 
 /* ---------------- 起動 ---------------- */
 let chosenGender='girl';
-function boot(useContinue){
+async function boot(useContinue){
+  await preloadCharacterModels();
   document.getElementById('title').style.display='none';
   document.getElementById('hud').style.display='block';
   initScene();
@@ -1234,7 +1243,18 @@ window.addEventListener('DOMContentLoaded',function(){
       b.classList.add('sel'); chosenGender=b.dataset.g;
     });
   });
-  if(loadGame()) document.getElementById('continueBtn').style.display='inline-block';
+  const hasSave=!!loadGame();
+  preloadCharacterModels().then(function(){
+    document.getElementById('loadingMsg').style.display='none';
+    document.getElementById('startBtn').disabled=false;
+    if(hasSave){
+      const cb=document.getElementById('continueBtn');
+      cb.style.display='inline-block'; cb.disabled=false;
+    }
+  }).catch(function(err){
+    document.getElementById('loadingMsg').textContent='モデルの読み込みに失敗しました。通信環境を確認してリロードしてください。';
+    console.error(err);
+  });
   document.getElementById('startBtn').addEventListener('click',function(){ boot(false); });
   document.getElementById('continueBtn').addEventListener('click',function(){ boot(true); });
   document.getElementById('nextDayBtn').addEventListener('click',nextDay);

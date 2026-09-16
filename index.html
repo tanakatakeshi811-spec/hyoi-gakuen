@@ -25,9 +25,10 @@
     <input id="nameInput" value="鴉羽 ツナグ" style="width:100%;padding:8px;border-radius:6px;border:1px solid #8a72e0;background:#0d0a17;color:#f0ece0;font-size:14px">
   </div>
   <div class="rowbtns">
-    <button class="btn big" id="startBtn">はじめる</button>
-    <button class="btn big" id="continueBtn" style="display:none">つづきから</button>
+    <button class="btn big" id="startBtn" disabled>はじめる</button>
+    <button class="btn big" id="continueBtn" style="display:none" disabled>つづきから</button>
   </div>
+  <div id="loadingMsg" style="font-size:12px;color:#c9b8ff">3Dモデルを読み込み中…</div>
   <div class="panel" style="font-size:11px;color:#9d92c0">
     操作: WASD/矢印で移動、マウスドラッグで視点回転、Eで調べる/話す、Qでしゃがみ(隠密)、Shiftでダッシュ。
     スマホは画面下の仮想スティックに対応。
@@ -97,6 +98,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script>if(typeof THREE==='undefined')document.write('<scr'+'ipt src="https://unpkg.com/three@0.128.0/build/three.min.js"><\/scr'+'ipt>');</script>
 <script>if(typeof THREE==='undefined')document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"><\/scr'+'ipt>');</script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/utils/SkeletonUtils.js"></script>
 <script src="data.js"></script>
 <script src="person.js"></script>
 <script src="game.js"></script>
