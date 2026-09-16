@@ -653,6 +653,31 @@ function actionRelease(npc){
   refreshActionMenu();
 }
 
+/* ---------------- 旧倉庫の発覚リスク(拘束中の相手がいる間、誰かが倉庫に
+   近づき続けると「発覚」BADエンドに繋がる) ---------------- */
+let shedDangerT=0, shedWarned=false;
+function checkShedExposure(dt){
+  const activeCaptives=Object.keys(captives).filter(function(k){ return captives[k]; });
+  if(!activeCaptives.length){ shedDangerT=0; shedWarned=false; return; }
+  const near=npcs.some(function(n){
+    if(n.captive||n.faint||n.transferred) return false;
+    return dist2(n.x,n.z,SHED.x,SHED.z)<9*9;
+  });
+  if(near){
+    shedDangerT+=dt;
+    if(shedDangerT>1.2 && !shedWarned){
+      shedWarned=true;
+      toast('……旧倉庫のほうから、誰かの足音が近づいてくる……');
+    }
+    if(shedDangerT>3.5){
+      triggerEnding('captive_exposed');
+    }
+  } else {
+    shedDangerT=Math.max(0,shedDangerT-dt*2);
+    if(shedDangerT<0.4) shedWarned=false;
+  }
+}
+
 function actionStudy(subject){
   player.grades[subject]=clamp(player.grades[subject]+8,0,100);
   trustDelta(0.4);
@@ -1078,6 +1103,7 @@ function animate(){
     updatePlayer(dt);
     npcs.forEach(function(n){ updateNPC(n,dt); });
     updateTakedown(dt);
+    checkShedExposure(dt);
     tickTime(dt);
     PROPS.forEach(function(p){
       if(p.cooldown){ p.cooldown-=dt; if(p.cooldown<=0){ p.cooldown=0; if(p.marker) p.marker.visible=true; } }
