@@ -944,7 +944,19 @@ function buildActionsFor(target){
     if(!acts.length) acts.push({label:'……誰もいない',disabled:true,onClick:function(){}});
     return acts;
   }
-  if(p.type==='stairsUp'||p.type==='stairsDown') return [];
+  if(p.type==='stairsUp'){
+    if(!player.flags.roofKey){
+      return [{label:'……鍵がかかっている',sub:'保健室の先生の机を調べれば見つかるかもしれない',disabled:true,onClick:function(){}}];
+    }
+    return [{label:'屋上へ向かう',onClick:function(){
+      playerObj.position.set(STAIRS_DOWN.x-1.5,0,STAIRS_DOWN.z+1);
+    }}];
+  }
+  if(p.type==='stairsDown'){
+    return [{label:'校舎へ戻る',onClick:function(){
+      playerObj.position.set(STAIRS_UP.x+1.5,0,STAIRS_UP.z+1);
+    }}];
+  }
   return [];
 }
 function refreshActionMenu(){
@@ -1136,9 +1148,9 @@ window.addEventListener('DOMContentLoaded',function(){
   document.getElementById('roofbtn').addEventListener('click',function(){
     const nearRoofDown=Math.hypot(playerObj.position.x-STAIRS_DOWN.x,playerObj.position.z-STAIRS_DOWN.z)<3;
     if(nearRoofDown){
-      playerObj.position.set(STAIRS_UP.x+3,0,STAIRS_UP.z+2);
+      playerObj.position.set(STAIRS_UP.x+1.5,0,STAIRS_UP.z+1);
     } else {
-      playerObj.position.set(STAIRS_DOWN.x-3,0,STAIRS_DOWN.z);
+      playerObj.position.set(STAIRS_DOWN.x-1.5,0,STAIRS_DOWN.z+1);
     }
   });
   document.getElementById('restartBtn').addEventListener('click',function(){ location.reload(); });
