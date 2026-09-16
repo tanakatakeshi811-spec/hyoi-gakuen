@@ -26,8 +26,11 @@
 
 ## このリポジトリについて
 
-- 単体3ページ構成(`index.html` + `style.css` + `data.js` + `person.js` +
-  `game.js`)で完結。ビルド不要、three.js r128をCDN経由で読み込みます
+- `index.html` + `style.css` + `data.js` + `person.js` + `game.js` +
+  `assets/`(3Dモデル)で完結。ビルド不要、three.js r128をCDN経由で
+  読み込みます
+- キャラクターは既製の低ポリ3Dモデル(CC0、`assets/CREDITS.md`参照)を
+  ベースに、キャラクターごとに色だけを塗り替えて使用しています
 - GitHub Pagesで公開しています
 
 ## 著作権・オリジナリティについて
