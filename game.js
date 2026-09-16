@@ -797,10 +797,19 @@ function endOfDay(){
   });
   document.getElementById('sumGrades').innerHTML=html;
 }
+function pickGraduateEnding(){
+  if(player.possession>=50) return 'graduate_dark';
+  if(player.affection>=45) return 'graduate_close';
+  return 'graduate_alone';
+}
 function nextDay(){
   document.getElementById('summary').style.display='none';
   gamePaused=false;
   player.day++;
+  if(player.day>DAY_LIMIT){
+    triggerEnding(pickGraduateEnding());
+    return;
+  }
   player.timeMin=DAY_START; player.periodIdx=0;
   player.flags.talkedToday={};
   player.testScores={};
