@@ -492,6 +492,12 @@ function actionTalk(npc){
     }
   } else if(npc.key==='hinano'){
     lines = hinanoState.scared ? ['ひなの「……もう、あなたの近くには行かない」'] : TALK_LINES.hinano_line;
+  } else if(npc.key==='kuroda'){
+    lines = TALK_LINES.kuroda_line;
+  } else if(npc.key==='kiryuu'){
+    lines = TALK_LINES.kiryuu_line;
+  } else if(npc.key==='janitor'){
+    lines = TALK_LINES.janitor_line;
   } else if(npc.role==='teacher'){
     lines = TALK_LINES.teacher_warn;
   } else {
