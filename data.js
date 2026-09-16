@@ -1,0 +1,218 @@
+/* ============================================================
+   憑愛学園(ヒョイガクエン) ―― データ定義
+   ゲームジャンル・仕組みのみ実在作品を参考にし、名前・キャラクター・
+   世界観・アセットはすべてオリジナル。「悪魔に取り憑かれている」設定は
+   しゅんりさん発案のオリジナル要素。
+   ============================================================ */
+
+const TILE = 4;      // 1マスのワールド単位サイズ
+const COLS = 56;      // 校舎グリッド 横
+const ROWS = 29;      // 校舎グリッド 縦(奥行き)
+
+/* ---- 校舎の部屋(すべてタイル座標、閉区間) ---- */
+const ROOMS = [
+  {key:'homeroom', name:'1年A組(教室)',   c0:2,  r0:2,  c1:9,  r1:10},
+  {key:'classB',   name:'1年B組(教室)',   c0:11, r0:2,  c1:18, r1:10},
+  {key:'class2a',  name:'2年A組(教室)',   c0:28, r0:2,  c1:35, r1:10},
+  {key:'library',  name:'図書室',         c0:37, r0:2,  c1:44, r1:10},
+  {key:'nurse',    name:'保健室',         c0:46, r0:2,  c1:51, r1:10},
+  {key:'science',  name:'理科室',         c0:2,  r0:16, c1:9,  r1:23},
+  {key:'music',    name:'音楽室',         c0:11, r0:16, c1:18, r1:23},
+  {key:'gym',      name:'体育館',         c0:28, r0:16, c1:44, r1:25},
+  {key:'art',      name:'美術部室',       c0:49, r0:16, c1:53, r1:19},
+  {key:'council',  name:'生徒会室',       c0:49, r0:21, c1:53, r1:25},
+  {key:'corridorN',name:'廊下',           c0:24, r0:2,  c1:26, r1:27},
+  {key:'corridorE',name:'廊下',           c0:2,  r0:12, c1:51, r1:14},
+  {key:'clubHall', name:'部室棟廊下',     c0:46, r0:15, c1:47, r1:25},
+  {key:'entrance', name:'昇降口',         c0:20, r0:25, c1:30, r1:28},
+];
+
+/* ---- ドア(壁を貫通させる床タイル) ---- */
+const DOORS = [
+  [5,11,7,11],  [14,11,16,11],
+  [31,11,33,11],[40,11,42,11],[48,11,49,11],
+  [5,15,7,15],  [14,15,16,15],
+  [35,15,38,15],
+  [46,15,47,15],
+  [45,19,45,20],[48,17,48,18],[48,22,48,23],
+  [35,26,38,28],
+];
+
+/* ---- 屋外ゾーン(このAABBの中は柵の外に出ない限り自由に歩ける) ---- */
+const OUTDOOR_ZONE = {x0:-40, z0:112, x1:270, z1:300};
+/* ---- 屋上ゾーン(校舎から遠く離れた場所に独立配置。階段で瞬間移動) ---- */
+const ROOF_OFFSET = {x:1000, z:0};
+const ROOF_ZONE = {x0:ROOF_OFFSET.x-4, z0:ROOF_OFFSET.z-4, x1:ROOF_OFFSET.x+64, z1:ROOF_OFFSET.z+64};
+/* ---- 旧倉庫(誘拐した相手を連れて行く場所)。屋外の隅に独立配置 ---- */
+const SHED = {x:236, z:260, w:16, d:14};
+
+/* 階段(校舎内)⇔屋上 の対応地点 */
+const STAIRS_UP   = {x: (24.5)*TILE, z: 3*TILE};
+const STAIRS_DOWN = {x: ROOF_OFFSET.x+8, z: ROOF_OFFSET.z+40};
+
+/* ---- NPC簡易経路探索用: 各部屋の出入口(ドア)座標 ---- */
+const DOOR_PT = {
+  homeroom:{x:26,z:46}, classB:{x:62,z:46}, class2a:{x:130,z:46}, library:{x:166,z:46},
+  nurse:{x:194,z:46}, science:{x:26,z:62}, music:{x:62,z:62}, gym:{x:146,z:62},
+  clubHall:{x:186,z:62}, art:{x:194,z:70}, council:{x:194,z:90},
+};
+function roomKeyAt(x,z){
+  const c=Math.floor(x/TILE), r=Math.floor(z/TILE);
+  for(const rm of ROOMS){ if(c>=rm.c0&&c<=rm.c1&&r>=rm.r0&&r<=rm.r1) return rm.key; }
+  return null;
+}
+
+/* ---- 部屋名を座標から引く ---- */
+function roomNameAt(x,z){
+  const c=Math.floor(x/TILE), r=Math.floor(z/TILE);
+  for(const rm of ROOMS){
+    if(c>=rm.c0&&c<=rm.c1&&r>=rm.r0&&r<=rm.r1) return rm.name;
+  }
+  if(x>=OUTDOOR_ZONE.x0&&x<=OUTDOOR_ZONE.x1&&z>=OUTDOOR_ZONE.z0&&z<=OUTDOOR_ZONE.z1){
+    if(z>200) return 'グラウンド';
+    if(x>220&&z>230) return '旧倉庫';
+    return '中庭';
+  }
+  if(x>=ROOF_ZONE.x0&&x<=ROOF_ZONE.x1&&z>=ROOF_ZONE.z0&&z<=ROOF_ZONE.z1) return '屋上';
+  return '校内';
+}
+
+/* ---- 1日の時間割(単位:分、8:00開始) ---- */
+const PERIODS = [
+  {name:'朝のSHR', start:480, end:495, type:'home'},
+  {name:'1限 国語', start:495, end:535, type:'class', subject:'国語', room:'homeroom'},
+  {name:'2限 数学', start:535, end:575, type:'class', subject:'数学', room:'homeroom'},
+  {name:'中休み',   start:575, end:590, type:'break'},
+  {name:'3限 理科', start:590, end:630, type:'class', subject:'理科', room:'science'},
+  {name:'4限 社会', start:630, end:670, type:'class', subject:'社会', room:'homeroom'},
+  {name:'昼休み',   start:670, end:715, type:'lunch'},
+  {name:'5限 英語', start:715, end:755, type:'class', subject:'英語', room:'homeroom'},
+  {name:'6限 体育', start:755, end:795, type:'class', subject:'体育', room:'gym'},
+  {name:'放課後',   start:795, end:870, type:'after'},
+];
+const DAY_START = PERIODS[0].start, DAY_END = PERIODS[PERIODS.length-1].end;
+const SUBJECTS = ['国語','数学','理科','社会','英語','体育'];
+
+/* ---- 武器/道具(排除・威嚇・護身用。演出はすべて様式化=気絶シルエット+SE) ----
+   power: 気絶成功のしやすさ  time: 気絶にかかる秒数  noise: 周囲に気付かれやすさ
+   range: 有効距離  threatBonus: 「脅す」行動での勇気減少ボーナス */
+const WEAPONS = [
+  {key:'book',  name:'教科書',       icon:'📖', power:0.55, time:2.6, noise:0.35, range:1.6, threatBonus:4,
+    desc:'いつでも持っている。威力は控えめだけど、これしか無い時も安心。'},
+  {key:'broom', name:'ほうき',       icon:'🧹', power:0.7, time:2.0, noise:0.5, range:2.0, threatBonus:6,
+    desc:'用具入れで見つけた。間合いが長く、そこそこ扱いやすい。', pickup:{room:'gym'}},
+  {key:'mop',   name:'モップ',       icon:'🧽', power:0.68, time:2.1, noise:0.55, range:2.0, threatBonus:5,
+    desc:'水拭き用。振り回すと少し滑りやすい。', pickup:{room:'gym'}},
+  {key:'cone',  name:'三角コーン',   icon:'🚧', power:0.8, time:1.8, noise:0.85, range:1.8, threatBonus:8,
+    desc:'体育倉庫の備品。かぶせるとよく効くが、音が響く。', pickup:{room:'gym'}},
+  {key:'rope',  name:'縄跳び',       icon:'🪢', power:0.9, time:1.3, noise:0.15, range:1.1, threatBonus:5,
+    desc:'とても静か。ただし相手のすぐ後ろまで近づく必要がある。拘束にも使える。', pickup:{room:'gym'}},
+  {key:'ext',   name:'消火器',       icon:'🧯', power:0.97, time:1.1, noise:0.9, range:2.2, threatBonus:10,
+    desc:'白い霧を浴びせて一瞬で昏倒させる。効果は抜群だが轟音が響く。', pickup:{room:'corridorN'}},
+  {key:'drum',  name:'太鼓のバチ',   icon:'🥢', power:0.75, time:1.6, noise:0.3, range:1.7, threatBonus:6,
+    desc:'音楽室の備品。連打が軽快で扱いやすい。', pickup:{room:'music'}},
+  {key:'shadow',name:'影の手',       icon:'🖤', power:1.0, time:0.9, noise:0.0, range:3.2, threatBonus:14,
+    desc:'テネブラの力。人間には聞こえないが、姿を見られると必ず「怪異」として大騒ぎになる。',
+    needPossession:60, supernatural:true},
+];
+
+/* ---- 贈り物(好感度アップ用アイテム。マップ上で採取/購入) ---- */
+const GIFTS = [
+  {key:'flower', name:'中庭の花',   icon:'🌸', value:6,  pickup:{zone:'courtyard'}},
+  {key:'bookmark',name:'図書室のしおり', icon:'🔖', value:8, pickup:{room:'library'}},
+  {key:'snack',  name:'購買のお菓子', icon:'🍬', value:10, pickup:{room:'entrance'}},
+  {key:'charm',  name:'手作りのお守り', icon:'🧵', value:16, pickup:{room:'homeroom'}, rare:true},
+];
+
+/* ---- 登場人物 ---- */
+const CHAR = {
+  hinata:{ key:'hinata', name:'藤代 陽向', role:'love',
+    favoriteGift:'snack',
+    look:{male:true, hairStyle:'short', hair:0x2b2118, skin:0xf0d3b4, uniform:0x24344a, accent:0xb5352f, eye:0x2f2a24},
+    home:'homeroom', lunch:'court_bench', after:'gym'},
+  hinano:{ key:'hinano', name:'白鳥 ひなの', role:'rival',
+    look:{male:false, hairStyle:'twin', hair:0xf4e6c4, skin:0xf3d8ba, uniform:0x24344a, accent:0xe07fa0, eye:0x6a4fae},
+    home:'homeroom', lunch:'court_bench2', after:'gym'},
+  kuroda:{ key:'kuroda', name:'黒田先生', role:'teacher',
+    look:{male:true, hairStyle:'short', hair:0x232323, skin:0xe7c7a2, uniform:0x2c2c34, accent:0x555555, eye:0x1c1c1c, tall:true},
+    home:'staffPatrol', vision:1.3, patrol:'corridors'},
+  kiryuu:{ key:'kiryuu', name:'桐生先生', role:'teacher',
+    look:{male:false, hairStyle:'bob', hair:0x33302c, skin:0xf1d8bd, uniform:0xe9e4d4, accent:0x6fae8f, eye:0x2a2420},
+    home:'nurse', vision:0.8, patrol:'none'},
+  mio:{ key:'mio', name:'二階堂 澪', role:'student',
+    look:{male:false, hairStyle:'long', hair:0x2e2622, skin:0xf0d3b4, uniform:0x24344a, accent:0x8fae6f, eye:0x2f2a24},
+    home:'library', lunch:'library', after:'library'},
+  nayuta:{ key:'nayuta', name:'東雲 那由多', role:'student',
+    look:{male:false, hairStyle:'bob', hair:0x21232a, skin:0xefd2b2, uniform:0x24344a, accent:0xc9a24a, eye:0x3a3a44},
+    home:'council', lunch:'council', after:'council', vision:1.1},
+  mei:{ key:'mei', name:'相楽 芽依', role:'student',
+    look:{male:false, hairStyle:'wild', hair:0x6b4a24, skin:0xefceac, uniform:0x24344a, accent:0xd97a2a, eye:0x4a3524},
+    home:'art', lunch:'art', after:'art'},
+  janitor:{ key:'janitor', name:'用務員さん', role:'teacher',
+    look:{male:true, hairStyle:'none', hair:0x555555, skin:0xd8b48c, uniform:0x40453a, accent:0x333333, eye:0x1c1c1c, tall:true},
+    home:'field', vision:0.9, patrol:'outdoor'},
+  kenta:{ key:'kenta', name:'森田 健太', role:'student',
+    look:{male:true, hairStyle:'wild', hair:0x2b2118, skin:0xefceac, uniform:0x24344a, accent:0x4a90d9, eye:0x2f2a24},
+    home:'classB', lunch:'field', after:'field'},
+  sakura:{ key:'sakura', name:'川島 さくら', role:'student',
+    look:{male:false, hairStyle:'twin', hair:0x3a2c22, skin:0xf3d8ba, uniform:0x24344a, accent:0xe07fa0, eye:0x4a3524},
+    home:'class2a', lunch:'court_bench2', after:'library'},
+};
+
+/* ---- 場所キー→ワールド座標(部屋の中心 or 屋外の目印) ---- */
+function roomCenter(key){
+  const rm=ROOMS.find(r=>r.key===key);
+  if(rm) return {x:(rm.c0+rm.c1+1)/2*TILE, z:(rm.r0+rm.r1+1)/2*TILE};
+  const extra={
+    'staffPatrol':{x:25*TILE,z:14*TILE},
+    'court_bench':{x:90,z:150},
+    'court_bench2':{x:120,z:150},
+    'field':{x:110,z:230},
+    'shrine':{x:60,z:170},
+  };
+  return extra[key]||{x:25*TILE,z:14*TILE};
+}
+
+/* ---- テネブラ(悪魔)の囁き。憑依度に応じて変化 ---- */
+const TENEBRA_LINES = {
+  low:[ 'テネブラ「……まだ眠っていていい。今日はただの一日だ」',
+        'テネブラ「お前の心臓、まだ人間のリズムだな」' ],
+  mid:[ 'テネブラ「ククッ……その子が邪魔なんだろう? 手伝ってやろうか」',
+        'テネブラ「怖がらせるくらい、造作もない」',
+        'テネブラ「疑われるのが怖い? ならもっと静かにやることだ」' ],
+  high:[ 'テネブラ「もう戻れないところまで来ている。気づいているか?」',
+         'テネブラ「お前の輪郭が、そろそろ僕のものになる」',
+         'テネブラ「愛も、憎しみも……全部僕がもらう」' ],
+};
+
+/* ---- ダイアログ(会話) ---- */
+const TALK_LINES = {
+  hinata_low:['陽向「あ、おはよう。今日もいい天気だね」','陽向「今日の授業、なに持ってきたっけ?」'],
+  hinata_mid:['陽向「最近よく話すようになったね。なんか嬉しいかも」','陽向「今度、一緒に帰らない?」'],
+  hinata_high:['陽向「君といると、なんか落ち着くんだ」','陽向「……その、ずっとこのままでいいのかな」'],
+  hinano_line:['ひなの「陽向くーん!　こっち向いて!」','ひなの「（あなた、最近陽向くんの近くにいすぎじゃない?）」'],
+  generic:['……。','特に用はないみたい。'],
+  teacher_warn:['黒田「おい、そこの! ちゃんと教室に戻れ」','黒田「不審な動きをするな。見ているぞ」'],
+};
+
+/* ---- 噂・脅しのフレーバーテキスト ---- */
+const RUMOR_LINES = ['「ねえ聞いた? あの子、実はすごく性格悪いらしいよ」を掲示板の陰でそっと広めた……',
+  '昇降口の靴箱に、根も葉もない噂の手紙をそっと差し込んだ……'];
+const THREATEN_LINES = ['「……全部知ってるからね」と、低い声で耳打ちした……'];
+
+/* ---- エンディング文 ---- */
+const ENDINGS = {
+  love_pure:{title:'両想いエンド ―― 変わらない朝',
+    text:'告白は成功した。テネブラの声はまだ胸の奥で燻っているけれど、\n君はまだ、自分の意思で笑うことができる。\n「これからもよろしく」――そう言って、陽向は笑った。'},
+  love_dark:{title:'両想いエンド ―― 昏い春',
+    text:'告白は成功した。けれど、君の瞳の奥にはもう別の色が混じっている。\n陽向は気づいていない。まだ、何も。\nテネブラは静かに笑った――「これでいい」。'},
+  expelled:{title:'BADエンド ―― 露見',
+    text:'不審な行動の数々は、ついに職員会議に報告された。\n呼び出された保護者面談の末、君は静かに転校することになった。\n誰にも本当のことは、話せないまま。'},
+  possessed:{title:'BADエンド ―― 明け渡し',
+    text:'テネブラの気配は、もう囁きではなかった。\nある朝、鏡に映った瞳の色が、二度と君のものに戻ることはなかった。'},
+  captive_exposed:{title:'BADエンド ―― 発覚',
+    text:'旧倉庫に人が近づく足音――その先に何があるか、想像するのは簡単だった。\n静かな学校に、けたたましいサイレンの音が響いた。'},
+};
+
+/* ---- 成績表評価(0-100 → 5段階) ---- */
+function gradeLetter(v){ return v>=90?'S':v>=75?'A':v>=55?'B':v>=35?'C':'D'; }

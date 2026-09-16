@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>憑愛学園 -Possessed Heart-</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div id="title">
+  <h1>憑愛学園</h1>
+  <div class="sub">-Possessed Heart- 完全オリジナル学園シミュレーション</div>
+  <div class="panel">
+    <p>桜坂学園に通うあなたの中には、いつからか小さな悪魔「テネブラ」が棲みついている。
+    誰にも言えないその秘密を抱えたまま、普通の学校生活を送り、想い人との距離を縮め、
+    時には邪魔者を陰で遠ざけながら――卒業までの日々を生き抜こう。</p>
+    <p style="color:#ffb3c6">告白の成立・秘密の露見・悪魔への明け渡し――結末は行動次第で変わります。</p>
+    <label class="optlbl">主人公の性別</label>
+    <div class="rowbtns" id="genderSel">
+      <button class="btn sel" data-g="girl">少女として始める</button>
+      <button class="btn" data-g="boy">少年として始める</button>
+    </div>
+    <label class="optlbl">主人公の名前</label>
+    <input id="nameInput" value="鴉羽 ツナグ" style="width:100%;padding:8px;border-radius:6px;border:1px solid #8a72e0;background:#0d0a17;color:#f0ece0;font-size:14px">
+  </div>
+  <div class="rowbtns">
+    <button class="btn big" id="startBtn">はじめる</button>
+    <button class="btn big" id="continueBtn" style="display:none">つづきから</button>
+  </div>
+  <div class="panel" style="font-size:11px;color:#9d92c0">
+    操作: WASD/矢印で移動、マウスドラッグで視点回転、Eで調べる/話す、Qでしゃがみ(隠密)、Shiftでダッシュ。
+    スマホは画面下の仮想スティックに対応。
+  </div>
+</div>
+
+<canvas id="c"></canvas>
+
+<div id="hud" style="display:none">
+  <div id="topbar">
+    <div>
+      <div id="clockbox">Day <b id="dayNum">1</b> ／ <b id="clockTxt">8:00</b>　<span id="periodTxt"></span>
+        <div id="roomlabel">現在地: ―</div></div>
+    </div>
+    <div id="meters">
+      <div class="meter">好感度<div class="bar"><div class="fill aff" id="fillAff"></div></div><span id="txtAff">0</span></div>
+      <div class="meter">憑依度<div class="bar"><div class="fill pos" id="fillPos"></div></div><span id="txtPos">0</span></div>
+      <div class="meter">疑いの目<div class="bar"><div class="fill sus" id="fillSus"></div></div><span id="txtSus">0</span></div>
+      <div class="meter">信頼度<div class="bar"><div class="fill trust" id="fillTrust"></div></div><span id="txtTrust">0</span></div>
+    </div>
+  </div>
+
+  <div id="toast"></div>
+  <div id="crosshair"></div>
+
+  <div id="interact" class="pe"><span class="key">E</span> <span id="interactTxt"></span></div>
+
+  <div id="progring"><svg viewBox="0 0 64 64">
+    <circle class="bg" cx="32" cy="32" r="28"></circle>
+    <circle class="fg" cx="32" cy="32" r="28"></circle>
+  </svg></div>
+
+  <div id="dialog" class="pe">
+    <div class="name" id="dlgName"></div>
+    <div class="body" id="dlgBody"></div>
+    <div class="choices" id="dlgChoices"></div>
+  </div>
+
+  <div id="actionmenu"></div>
+
+  <div id="weaponbar" class="pe"></div>
+
+  <button class="btn pe" id="sleepbtn">🛌 眠って1日を終える</button>
+  <button class="btn pe" id="roofbtn">🔑 屋上へ向かう</button>
+
+  <div id="joyL"><div class="stickbase"></div><div class="stick" id="stickL"></div></div>
+  <div id="joyR"><div class="stickbase"></div><div class="stick" id="stickR"></div></div>
+</div>
+
+<div id="summary">
+  <div class="panel">
+    <h2 id="sumTitle">1日の終わり</h2>
+    <p id="sumBody"></p>
+    <table class="grades" id="sumGrades"></table>
+    <div class="rowbtns" style="margin-top:12px"><button class="btn big" id="nextDayBtn">次の日へ</button></div>
+  </div>
+</div>
+
+<div id="ending">
+  <div class="panel">
+    <h2 id="endTitle"></h2>
+    <p id="endBody" style="white-space:pre-wrap"></p>
+    <div class="rowbtns" style="margin-top:12px"><button class="btn big" id="restartBtn">タイトルへ戻る</button></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>if(typeof THREE==='undefined')document.write('<scr'+'ipt src="https://unpkg.com/three@0.128.0/build/three.min.js"><\/scr'+'ipt>');</script>
+<script>if(typeof THREE==='undefined')document.write('<scr'+'ipt src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"><\/scr'+'ipt>');</script>
+<script src="data.js"></script>
+<script src="person.js"></script>
+<script src="game.js"></script>
+</body>
+</html>
