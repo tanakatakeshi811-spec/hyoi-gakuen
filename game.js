@@ -216,6 +216,7 @@ function initScene(){
   scene.background=new THREE.Color(0x8fb8e0);
   scene.fog=new THREE.Fog(0x8fb8e0,60,260);
   camera=new THREE.PerspectiveCamera(62, innerWidth/innerHeight, 0.1, 800);
+  updateCameraFov();
   renderer=new THREE.WebGLRenderer({canvas:document.getElementById('c'),antialias:true});
   renderer.setPixelRatio(Math.min(devicePixelRatio||1,2));
   renderer.setSize(innerWidth,innerHeight);
@@ -239,9 +240,32 @@ function initScene(){
   buildProps();
 
   window.addEventListener('resize',function(){
-    camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+    updateCameraFov();
     renderer.setSize(innerWidth,innerHeight);
+    layoutMobileHUD();
   });
+}
+
+/* 縦長のスマホ画面では、縦方向の画角(fov)を固定したままだと横方向の視野が
+   極端に狭くなり(例:390x844で約31°しかない)、ストローで覗いているような
+   窮屈な見た目になる。横長(aspect>=1)は従来通り62度、縦長になるほど
+   横方向の視野を確保するために縦fovを最大92度まで広げる */
+function updateCameraFov(){
+  const aspect=innerWidth/innerHeight;
+  camera.aspect=aspect;
+  camera.fov = aspect>=1 ? 62 : clamp(62+(1-aspect)*20, 62, 78);
+  camera.updateProjectionMatrix();
+}
+
+/* スマホ横画面など仮想スティックの実サイズが変わる環境向けに、スティックの実測
+   高さを--joyhへ反映し、アクションメニュー/インタラクト表示/持ち物バーが
+   スティックに重ならないようCSS側(calc(var(--joyh)...))で底上げする */
+function layoutMobileHUD(){
+  const joyL=document.getElementById('joyL');
+  if(!joyL) return;
+  const visible=getComputedStyle(joyL).display!=='none';
+  const h=visible?joyL.getBoundingClientRect().height:0;
+  document.documentElement.style.setProperty('--joyh',(h>0?h:0)+'px');
 }
 
 /* ---------------- 小物(インタラクト可能プロップ) ---------------- */
@@ -1040,36 +1064,49 @@ window.addEventListener('keydown',function(e){
 });
 window.addEventListener('keyup',function(e){ keys[e.key.toLowerCase()]=false; });
 
-let dragging=false,lastPX=0,lastPY=0;
+/* 各ハンドラは自分が掴んだpointerIdだけを追跡する(pointerIdでの絞り込みが
+   無いと、両手同時操作=左スティックで移動しながら右スティックで視点操作、
+   のような複数指の同時タッチで指同士の入力が混線するバグになる) */
+let dragging=false,dragId=null,lastPX=0,lastPY=0;
 function bindCameraDrag(el){
-  el.addEventListener('pointerdown',function(e){ dragging=true; lastPX=e.clientX; lastPY=e.clientY; });
-  window.addEventListener('pointerup',function(){ dragging=false; });
+  el.addEventListener('pointerdown',function(e){
+    if(dragging) return;
+    dragging=true; dragId=e.pointerId; lastPX=e.clientX; lastPY=e.clientY;
+  });
+  function release(e){ if(e.pointerId===dragId){ dragging=false; dragId=null; } }
+  window.addEventListener('pointerup',release);
+  window.addEventListener('pointercancel',release);
   window.addEventListener('pointermove',function(e){
-    if(!dragging) return;
+    if(!dragging||e.pointerId!==dragId) return;
     const dx=e.clientX-lastPX, dy=e.clientY-lastPY; lastPX=e.clientX; lastPY=e.clientY;
     camYaw-=dx*0.006;
-    camPitch=clamp(camPitch-dy*0.004,-0.3,0.85);
+    camPitch=clamp(camPitch+dy*0.004,-0.3,0.85);
   });
 }
 const moveVec={x:0,y:0}, lookVec={x:0,y:0};
 function bindJoystick(baseId,stickId,onMove,onEnd){
   const base=document.getElementById(baseId), stick=document.getElementById(stickId);
-  let active=false,startX=0,startY=0;
+  let active=false,activeId=null,startX=0,startY=0;
   base.addEventListener('pointerdown',function(e){
-    active=true; const r=base.getBoundingClientRect(); startX=r.left+r.width/2; startY=r.top+r.height/2;
+    if(active) return;
+    active=true; activeId=e.pointerId;
+    const r=base.getBoundingClientRect(); startX=r.left+r.width/2; startY=r.top+r.height/2;
     e.preventDefault();
   });
   window.addEventListener('pointermove',function(e){
-    if(!active) return;
+    if(!active||e.pointerId!==activeId) return;
     let dx=e.clientX-startX, dy=e.clientY-startY;
     const d=Math.hypot(dx,dy), max=60;
     if(d>max){ dx=dx/d*max; dy=dy/d*max; }
     stick.style.transform='translate('+dx+'px,'+dy+'px)';
     onMove(dx/max,dy/max);
   });
-  window.addEventListener('pointerup',function(){
-    if(!active) return; active=false; stick.style.transform=''; onEnd&&onEnd();
-  });
+  function release(e){
+    if(!active||e.pointerId!==activeId) return;
+    active=false; activeId=null; stick.style.transform=''; onEnd&&onEnd();
+  }
+  window.addEventListener('pointerup',release);
+  window.addEventListener('pointercancel',release);
 }
 
 function updatePlayer(dt){
@@ -1084,8 +1121,8 @@ function updatePlayer(dt){
   let moving=false;
   if(len>0.08){
     mx/=len; mz/=len;
-    const fx = mx*Math.cos(camYaw) - mz*Math.sin(camYaw);
-    const fz = -mx*Math.sin(camYaw) - mz*Math.cos(camYaw);
+    const fx = -mx*Math.cos(camYaw) - mz*Math.sin(camYaw);
+    const fz = mx*Math.sin(camYaw) - mz*Math.cos(camYaw);
     const spd = (keys['shift']?9.4:6.1) * (player.sneak?0.55:1) * (player.carrying?0.55:1);
     const nx=playerObj.position.x+fx*spd*dt, nz=playerObj.position.z+fz*spd*dt;
     if(!blocked(nx,playerObj.position.z,0.42)) playerObj.position.x=nx;
@@ -1113,7 +1150,11 @@ function updatePlayer(dt){
   }
 }
 function updateCamera(){
-  const dist=7.6;
+  // 縦長スマホ(aspect<1)はfovを少し広げるだけだと近くの床とキャラで画面が
+  // 埋まりすぎるので、狭いほどカメラを少し後ろに引いて視界の圧迫感を抑える
+  const aspect=innerWidth/innerHeight;
+  const distMul = aspect<1 ? clamp(1+(1-aspect)*0.5,1,1.4) : 1;
+  const dist=7.6*distMul;
   const fwd={x:Math.sin(camYaw),z:Math.cos(camYaw)};
   const tx=playerObj.position.x, tz=playerObj.position.z;
   camera.position.set(tx-fwd.x*dist, 1.6+3.3+Math.sin(camPitch)*3.0, tz-fwd.z*dist);
@@ -1135,7 +1176,7 @@ function animate(){
     });
   }
   camYaw-=lookVec.x*dt*2.2;
-  camPitch=clamp(camPitch-lookVec.y*dt*1.6,-0.3,0.85);
+  camPitch=clamp(camPitch+lookVec.y*dt*1.6,-0.3,0.85);
   updateCamera();
   refreshActionMenu();
   updateMeters();
@@ -1182,6 +1223,8 @@ function boot(useContinue){
   bindJoystick('joyR','stickR',function(dx,dy){ lookVec.x=dx; lookVec.y=dy; },function(){ lookVec.x=0; lookVec.y=0; });
   clockObj=new THREE.Clock();
   updateMeters();
+  layoutMobileHUD();
+  window.addEventListener('orientationchange',function(){ setTimeout(layoutMobileHUD,250); });
   animate();
 }
 window.addEventListener('DOMContentLoaded',function(){
