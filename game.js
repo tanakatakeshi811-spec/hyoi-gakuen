@@ -927,13 +927,19 @@ function actionSpray(npc){
 }
 
 /* 2026-09-17続報5: 「背後からじゃないとできないのがうざい」というフィード
-   バックを受けて、正面からでも発動できるように変更。ただし正面は
-   ①背後よりチャンネリング(構え)時間が長い(FRONT_TIME_MULで約1.9倍)、
-   ②構えている間、相手にランダムで勘づかれて失敗する独自リスクがある
-   (背後は相手から死角にいるので勘づかれる余地が無く、このリスクは0のまま)、
-   という2軸で「正面は明確にハイリスク」になるようにした。影の手
-   (supernatural)はテネブラの力そのものなので元から向きを問わない仕様を維持 */
-const FRONT_TIME_MUL=1.9, FRONT_NOTICE_PER_SEC=0.16;
+   バックを受けて、正面からでも発動できるように変更。正面は背後より
+   チャンネリング(構え)時間が長い(FRONT_TIME_MULで約1.9倍)。影の手
+   (supernatural)はテネブラの力そのものなので元から向きを問わない仕様を維持
+   2026-09-17続報6: 「ボタンを押したのに距離が足りず失敗する」「構えている
+   途中でランダムに失敗して止まる」という不満を受けて仕様変更。
+   ①ボタン自体をw.range圏内にいる時しか出さない方式にしたので(buildActionsFor
+   側で対応)、ボタンが押せる=射程内が保証されておりstartTakedown内の距離
+   判定は事実上フェイルセーフのみになった。②構え中にランダムで失敗する
+   抽選(旧FRONT_NOTICE_PER_SEC)は完全撤廃し、ボタンを押したら必ず最後まで
+   完走して成功する。代わりに正面の間だけのリスクとして、構え中に他のNPCの
+   視界に入ると(失敗はしないが)一度だけ目撃扱いになり疑いの目が上がる
+   仕様を追加した(下のupdateTakedown参照) */
+const FRONT_TIME_MUL=1.9;
 let takedown=null; // {npcKey, t, need, behindOk}
 function startTakedown(npc){
   const w=currentWeapon();
@@ -958,14 +964,15 @@ function updateTakedown(dt){
   const dx=npc.x-playerObj.position.x, dz=npc.z-playerObj.position.z;
   const d=Math.hypot(dx,dz);
   if(d>w.range+0.6){ endTakedown(); toast('相手が離れてしまった……'); return; }
-  if(!takedown.behindOk && Math.random()<FRONT_NOTICE_PER_SEC*dt){
-    // 正面から構えている間は毎秒一定確率で相手に勘づかれ、失敗する
-    npc.witness=Math.max(npc.witness,1);
+  if(!takedown.behindOk && !takedown.spotted){
+    // 正面は構えが長い分、他のNPCの目に入りやすい。ただし失敗はしない
+    // (押したら必ず成功、という仕様)。目撃扱いは1回だけ発生させる
     const seen=witnessesAt(npc.x,npc.z,npc.key);
-    gainSuspicion(20+15*seen.length,'正面から近づいたせいで、勘づかれてしまった……!!');
-    endTakedown();
-    toast(npc.name+'に勘づかれた……!取り押さえは失敗!');
-    return;
+    if(seen.length){
+      takedown.spotted=true;
+      seen.forEach(function(n){ n.witness=Math.max(n.witness,1); });
+      gainSuspicion(15+10*seen.length,'正面から取り押さえている姿を、誰かに見られたかもしれない……!!');
+    }
   }
   takedown.t+=dt;
   showRing(takedown.t/takedown.need);
@@ -1348,7 +1355,14 @@ function buildActionsFor(target){
       if(npc.key==='hinano'&&!npc.scared){
         acts.push({label:'脅す',sub:'勇気を削る／目撃注意',onClick:function(){ actionThreaten(npc); }});
       }
-      acts.push({label:'気絶させる',sub:'道具:'+currentWeapon().name+'／背後推奨(正面は時間↑&勘づかれるリスク)',onClick:function(){ startTakedown(npc); }});
+      /* 2026-09-17続報6: 「押しても届かず失敗する」を無くすため、道具の
+         射程(w.range)内にいる時だけボタンを出す(=既存のEキー系インタラクト
+         と同じ「近づいたら自動的に出る」方式)。範囲外ではボタンごと出さない */
+      const wpn=currentWeapon();
+      const distToNpc=Math.hypot(npc.x-playerObj.position.x,npc.z-playerObj.position.z);
+      if(distToNpc<=wpn.range){
+        acts.push({label:'気絶させる',sub:'道具:'+wpn.name+'／背後は速い・正面は時間がかかる(必ず成功)',onClick:function(){ startTakedown(npc); }});
+      }
       if(npc.witness>0) acts.push({label:'なだめる',sub:'目撃の記憶を落ち着かせる',onClick:function(){ actionCalm(npc); }});
     } else if(npc.witness>0){
       acts.push({label:'なだめる',sub:'目撃の記憶を落ち着かせる',onClick:function(){ actionCalm(npc); }});
@@ -1399,7 +1413,13 @@ function refreshActionMenu(){
   if(!target){ interactEl.style.display='none'; if(menuEl.innerHTML) menuEl.innerHTML=''; lastTargetSig=null; return; }
   interactEl.style.display='block';
   document.getElementById('interactTxt').textContent = target.type==='npc'? target.npc.name : (target.prop.label||'調べる');
-  const sig=target.type+'_'+(target.npc?target.npc.key+target.npc.witness+target.npc.faint:target.prop.type+target.prop.x)+'_'+player.affection+'_'+totalGifts()+'_'+player.flags.roofKey+'_'+Object.keys(captives).length+'_'+player.carrying;
+  /* 2026-09-17続報6: 「気絶させる」ボタンの射程内/外(inTakedownRange)と
+     選択中の武器(selectedWeapon、道具ごとに射程が違う)をsigに含めて、
+     プレイヤーが立ち位置だけ変えて射程の内外をまたいだ時もボタンの
+     出/消しがちゃんとライブで反映されるようにする(位置そのものは常時
+     細かく変わるので含めない。しきい値をまたいだ時だけ変わるbooleanのみ) */
+  const inTakedownRange = target.npc ? (Math.hypot(target.npc.x-playerObj.position.x,target.npc.z-playerObj.position.z)<=currentWeapon().range) : false;
+  const sig=target.type+'_'+(target.npc?target.npc.key+target.npc.witness+target.npc.faint:target.prop.type+target.prop.x)+'_'+player.affection+'_'+totalGifts()+'_'+player.flags.roofKey+'_'+Object.keys(captives).length+'_'+player.carrying+'_'+player.selectedWeapon+'_'+inTakedownRange;
   if(sig===lastTargetSig) return;
   lastTargetSig=sig;
   menuEl.innerHTML='';
