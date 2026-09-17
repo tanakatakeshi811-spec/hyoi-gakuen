@@ -1600,6 +1600,9 @@ function bindHoldButton(el,onChange){
 }
 let mobileDash=false, mobileSneak=false;
 
+/* 2026-09-17続報7: 「今のダッシュ時のスピードを200%早くしろ」= 元の3倍
+   (+200%)。ダッシュ以外の通常速度・しゃがみ・運搬中の倍率は変更しない */
+const DASH_SPEED_MUL=3;
 /* 角度の最短経路での滑らかな追従。[[放課後の居残り]]のangLerp()をそのまま移植 */
 function angLerp(a,b,t){
   let d=((b-a+Math.PI*3)%(Math.PI*2))-Math.PI;
@@ -1629,10 +1632,23 @@ function updatePlayer(dt){
     const nx=mx/mag, nz=mz/mag;
     const fx = -nx*Math.cos(camYaw) - nz*Math.sin(camYaw);
     const fz = nx*Math.sin(camYaw) - nz*Math.cos(camYaw);
-    const spd = (dashing?9.4:6.1) * Math.min(1,mag) * (player.sneak?0.55:1) * (player.carrying?0.55:1);
-    const npx=playerObj.position.x+fx*spd*dt, npz=playerObj.position.z+fz*spd*dt;
-    if(!blocked(npx,playerObj.position.z,0.42)) playerObj.position.x=npx;
-    if(!blocked(playerObj.position.x,npz,0.42)) playerObj.position.z=npz;
+    /* 2026-09-17続報7: しゅんりさん要望「ダッシュ時のスピードを200%早く
+       しろ」(=元の3倍)。DASH_SPEED_MULは上で定義 */
+    const spd = (dashing?(9.4*DASH_SPEED_MUL):6.1) * Math.min(1,mag) * (player.sneak?0.55:1) * (player.carrying?0.55:1);
+    /* ダッシュが3倍速になったことで1フレームあたりの移動量が大きくなり、
+       低フレームレート時(dtが大きい時)に薄いOBSTACLES(ベンチ等)や壁の
+       角をすり抜ける恐れがある。移動距離が一定(1.2単位)を超える時は
+       小刻みなサブステップに分割し、各ステップごとにblocked()判定を
+       行うことですり抜けを防ぐ(壁自体は1マス=4単位の厚みがあるので
+       通常フレームレートでは元々問題ないが、フレーム落ち時の保険) */
+    const totalMove=spd*dt;
+    const steps=Math.max(1,Math.ceil(totalMove/1.2));
+    const stepDist=totalMove/steps;
+    for(let s=0;s<steps;s++){
+      const npx=playerObj.position.x+fx*stepDist, npz=playerObj.position.z+fz*stepDist;
+      if(!blocked(npx,playerObj.position.z,0.42)) playerObj.position.x=npx;
+      if(!blocked(playerObj.position.x,npz,0.42)) playerObj.position.z=npz;
+    }
     /* 向き変更も瞬時スナップから滑らかな追従へ。[[放課後の居残り]]の
        me.yaw=angLerp(me.yaw,atan2(dx,dz),min(1,dt*13))と同じ式 */
     playerObj.rotation.y=angLerp(playerObj.rotation.y,Math.atan2(fx,fz),Math.min(1,dt*13));
@@ -1640,7 +1656,11 @@ function updatePlayer(dt){
   }
   player.x=playerObj.position.x; player.z=playerObj.position.z;
   playerObj.scale.y=player.sneak?0.82:1;
-  animateWalk(playerObj,dt,moving,dashing?1.5:1);
+  /* 2026-09-17続報7: 実際の移動速度は3倍になったが、歩行アニメーションの
+     再生速度(timeScale)を移動速度と完全比例させると脚の動きが不自然に
+     速くなりすぎるため、見た目のバランスを取って2.0倍に留める
+     (実測で移動が滑って見える「地面を滑走している」感を避ける程度で十分) */
+  animateWalk(playerObj,dt,moving,dashing?2.0:1);
   const aura=playerObj.userData.aura;
   aura.visible=player.possession>=30;
   if(aura.visible) aura.material.opacity=0.14+0.34*(player.possession/100);
