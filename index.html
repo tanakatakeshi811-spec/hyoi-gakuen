@@ -31,7 +31,7 @@
   <div id="loadingMsg" style="font-size:12px;color:#c9b8ff">3Dモデルを読み込み中…</div>
   <div class="panel" style="font-size:11px;color:#9d92c0">
     操作: WASD/矢印で移動、マウスドラッグで視点回転、Eで調べる/話す、Qでしゃがみ(隠密)、Shiftでダッシュ。
-    スマホは画面下の仮想スティックに対応。
+    スマホは画面下の仮想スティック(左:移動／右:視点)+ダッシュ/しゃがむボタンに対応。
   </div>
 </div>
 
@@ -73,6 +73,14 @@
 
   <button class="btn pe" id="sleepbtn">🛌 眠って1日を終える</button>
   <button class="btn pe" id="roofbtn">🔑 屋上へ向かう</button>
+
+  <!-- スマホ専用: PCではShift/Qキーで使える操作(ダッシュ・しゃがみ)に、
+       画面上に対応するボタンが無かった分の追加(2026-09-17)。
+       PC/デスクトップでは#mobileModsごとCSSで非表示 -->
+  <div id="mobileMods" class="pe">
+    <button id="dashBtn" class="modbtn"><span>ダッシュ</span><b>Shift</b></button>
+    <button id="sneakBtn" class="modbtn"><span>しゃがむ</span><b>Q</b></button>
+  </div>
 
   <div id="joyL"><div class="stickbase"></div><div class="stick" id="stickL"></div></div>
   <div id="joyR"><div class="stickbase"></div><div class="stick" id="stickR"></div></div>

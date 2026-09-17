@@ -108,14 +108,21 @@ const WEAPONS = [
     desc:'体育倉庫の備品。かぶせるとよく効くが、音が響く。', pickup:{room:'gym'}},
   {key:'rope',  name:'縄跳び',       icon:'🪢', power:0.9, time:1.3, noise:0.15, range:1.1, threatBonus:5,
     desc:'とても静か。ただし相手のすぐ後ろまで近づく必要がある。拘束にも使える。', pickup:{room:'gym'}},
-  {key:'ext',   name:'消火器',       icon:'🧯', power:0.97, time:1.1, noise:0.9, range:2.2, threatBonus:10,
-    desc:'白い霧を浴びせて一瞬で昏倒させる。効果は抜群だが轟音が響く。', pickup:{room:'corridorN'}},
   {key:'drum',  name:'太鼓のバチ',   icon:'🥢', power:0.75, time:1.6, noise:0.3, range:1.7, threatBonus:6,
     desc:'音楽室の備品。連打が軽快で扱いやすい。', pickup:{room:'music'}},
   {key:'shadow',name:'影の手',       icon:'🖤', power:1.0, time:0.9, noise:0.0, range:3.2, threatBonus:14,
     desc:'テネブラの力。人間には聞こえないが、姿を見られると必ず「怪異」として大騒ぎになる。',
     needPossession:60, supernatural:true},
 ];
+
+/* ---- 消火器(排除系の「気絶させる」とは別枠の道具。正面からでも使え、
+   気絶はさせず「視界を奪って足止めする」という別の効果を持つ。校内の
+   備品として複数箇所に配置し、拾って所持数を増やせる) ---- */
+const EXTINGUISHER = {
+  name:'消火器', icon:'🧯', range:3.0, blindTime:5.5,
+  desc:'白い薬剤を吹きかけて、相手の視界を一時的に奪い足止めする。'
+    +'気絶はさせないので正面からでも使えるが、噴射音で周囲に気づかれるかもしれない。'
+};
 
 /* ---- 贈り物(好感度アップ用アイテム。マップ上で採取/購入) ---- */
 const GIFTS = [

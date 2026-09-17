@@ -246,6 +246,7 @@ function initScene(){
   buildOutdoor();
   buildRoof();
   buildProps();
+  buildSchoolDecor();
 
   window.addEventListener('resize',function(){
     updateCameraFov();
@@ -274,6 +275,9 @@ function layoutMobileHUD(){
   const visible=getComputedStyle(joyL).display!=='none';
   const h=visible?joyL.getBoundingClientRect().height:0;
   document.documentElement.style.setProperty('--joyh',(h>0?h:0)+'px');
+  const wbar=document.getElementById('weaponbar');
+  const wh=wbar?wbar.getBoundingClientRect().height:0;
+  document.documentElement.style.setProperty('--wbh',(wh>0?wh:0)+'px');
 }
 
 /* ---------------- 小物(インタラクト可能プロップ) ---------------- */
@@ -327,6 +331,74 @@ function buildProps(){
   addMarker(STAIRS_DOWN.x,STAIRS_DOWN.z,0xbfa6ff,'cyl');
 
   PROPS.push({type:'shed',x:SHED.x,z:SHED.z+SHED.d/2+1.5,label:'旧倉庫'});
+
+  /* 消火器(校内の備品として複数配置。防災設備らしく廊下・理科室・体育館に) */
+  const extSpots=[roomCenter('corridorN'),roomCenter('science'),roomCenter('gym')];
+  extSpots.forEach(function(c,i){
+    const x=c.x+(i-1)*2, z=c.z+6;
+    const marker=addMarker(x,z,0xff5a3c,'cyl');
+    PROPS.push({type:'extinguisher',x:x,z:z,marker:marker,label:EXTINGUISHER.icon+' '+EXTINGUISHER.name+'を持つ'});
+  });
+}
+
+/* ---------------- 校舎の見た目強化(既製3Dモデル、当たり判定はいじらない) ----------------
+   壁・床のグリッド衝突判定(blocked())はそのまま維持し、その上に見た目だけの
+   机・黒板・本棚を重ねて表示する。既存の当たり判定に干渉しないよう、これらの
+   装飾モデル自体には新しいOBSTACLESを追加しない(多少すり抜けられても、
+   見た目の情報量を増やすことを優先) */
+function roomWorldBounds(key){
+  const rm=ROOMS.find(function(r){ return r.key===key; });
+  if(!rm) return null;
+  return {x0:rm.c0*TILE, x1:(rm.c1+1)*TILE, z0:rm.r0*TILE, z1:(rm.r1+1)*TILE};
+}
+function decorateClassroom(roomKey,rows,cols){
+  const b=roomWorldBounds(roomKey);
+  if(!b) return;
+  const board=makeBlackboardModel();
+  if(board){ board.position.set((b.x0+b.x1)/2,2.0,b.z0+0.2); scene.add(board); }
+  const marginX=4, startZ=b.z0+7, endZ=b.z1-4;
+  const usableW=(b.x1-b.x0)-marginX*2;
+  const colGap=cols>1?usableW/(cols-1):0;
+  const rowGap=rows>1?(endZ-startZ)/(rows-1):0;
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      const desk=makeDeskModel();
+      if(!desk) continue;
+      desk.position.set(b.x0+marginX+colGap*c,0,startZ+rowGap*r);
+      desk.rotation.y=Math.PI; // 黒板(北側の壁)を向く
+      scene.add(desk);
+    }
+  }
+}
+function decorateLibrary(){
+  const b=roomWorldBounds('library');
+  if(!b) return;
+  for(let i=0;i<3;i++){
+    const bc=makeBookcaseModel();
+    if(!bc) continue;
+    bc.position.set(b.x1-0.7,0,b.z0+3.5+i*4.2);
+    bc.rotation.y=-Math.PI/2;
+    scene.add(bc);
+  }
+  const marginX=4, startZ=b.z0+5, endZ=b.z1-4, cols=3, rows=2;
+  const usableW=(b.x1-b.x0)-marginX*2-4; // 本棚側は避ける
+  const colGap=cols>1?usableW/(cols-1):0;
+  const rowGap=rows>1?(endZ-startZ)/(rows-1):0;
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      const desk=makeDeskModel();
+      if(!desk) continue;
+      desk.position.set(b.x0+marginX+colGap*c,0,startZ+rowGap*r);
+      desk.rotation.y=Math.random()<0.5?0:Math.PI; // 閲覧席なので向きはまちまちに
+      scene.add(desk);
+    }
+  }
+}
+function buildSchoolDecor(){
+  decorateClassroom('homeroom',3,3);
+  decorateClassroom('classB',3,3);
+  decorateClassroom('class2a',3,3);
+  decorateLibrary();
 }
 
 /* ---------------- プレイヤー ---------------- */
@@ -335,7 +407,7 @@ function newPlayer(gender,name){
   return {
     name:name||'鴉羽 ツナグ', male:gender==='boy',
     x:100, z:106, yaw:Math.PI, sneak:false, carrying:false, captiveKey:null,
-    selectedWeapon:'book', weapons:{book:true},
+    selectedWeapon:'book', weapons:{book:true}, extinguisher:0,
     affection:0, possession:0, suspicion:0, trust:50,
     grades:{国語:40,数学:40,理科:40,社会:40,英語:40,体育:40},
     testScores:{},
@@ -427,9 +499,15 @@ function followPath(npc,dt,speedMul){
 function updateNPC(npc,dt){
   if(npc.transferred||npc.captive){ npc.rig.visible=false; return; }
   npc.rig.visible=true;
+  if(npc.blinded){
+    npc.blindT-=dt;
+    if(npc.blindT<=0){ npc.blinded=false; npc.rig.userData.blindMark.visible=false; }
+  }
   if(npc.faint){
     npc.faintT-=dt;
     if(npc.faintT<=0 && !player.carrying){ npc.faint=false; npc.rig.userData.faint=false; npc.rig.userData.faintMark.visible=false; }
+  } else if(npc.blinded){
+    // 視界を奪われている間は足止めされ、その場から動けない
   } else if(!player.carrying || player.captiveKey!==npc.key){
     if(npc.key==='kuroda'){
       if(!followPath(npc,dt,0.85)){
@@ -459,10 +537,12 @@ function updateNPC(npc,dt){
   animateWalk(npc.rig,dt,moving,0.9);
   npc.rig.userData.witnessMark.visible = npc.witness>0;
   npc.rig.userData.faintMark.visible = npc.faint;
+  npc.rig.userData.blindMark.visible = npc.blinded;
 }
 
 /* ---------------- 視界/隠密 ---------------- */
 function canSee(npc,x,z,rangeOverride){
+  if(npc.blinded) return false; // 消火器で視界を奪われている間は何も見えない
   const range=rangeOverride!==undefined?rangeOverride:npc.visionRange;
   const dx=x-npc.x, dz=z-npc.z; const d=Math.hypot(dx,dz);
   if(d>range) return false;
@@ -482,7 +562,7 @@ function canSee(npc,x,z,rangeOverride){
 function witnessesAt(x,z,excludeKey){
   const mul=player.sneak?0.5:1;
   return npcs.filter(function(n){
-    if(n.key===excludeKey||n.faint||n.captive||n.transferred) return false;
+    if(n.key===excludeKey||n.faint||n.captive||n.transferred||n.blinded) return false;
     return canSee(n,x,z,n.visionRange*mul);
   });
 }
@@ -621,6 +701,29 @@ function actionThreaten(npc){
     hinanoState.scared=true;
     const n=npcByKey('hinano'); if(n) n.scared=true;
     toast('ひなのは怯えて、陽向に近づかなくなった……');
+  }
+  refreshActionMenu();
+}
+
+/* 消火器: 「気絶させる」とは別枠の道具。正面からでも使え、気絶はさせず
+   「視界を奪って足止めする」効果のみを持つ(目撃をやり過ごしたい/通せんぼ
+   されている場面を切り抜けたい、といった用途を想定した排除アクションとは
+   別系統のユーティリティ) */
+function actionSpray(npc){
+  if(player.extinguisher<=0){ toast('消火器を持っていない。'); return; }
+  const d=Math.hypot(npc.x-playerObj.position.x,npc.z-playerObj.position.z);
+  if(d>EXTINGUISHER.range){ toast('近づかないと届かない。'); return; }
+  player.extinguisher--;
+  npc.blinded=true; npc.blindT=EXTINGUISHER.blindTime;
+  npc.path=[];
+  npc.rig.userData.blindMark.visible=true;
+  toast(npc.name+'に消火器を吹きかけた……視界を奪って足止めした!');
+  const seen=witnessesAt(npc.x,npc.z,npc.key);
+  if(seen.length){
+    seen.forEach(function(n){ n.witness=Math.max(n.witness,1); });
+    gainSuspicion(18*seen.length,'消火器の噴射音に気づかれてしまった……!');
+  } else {
+    gainSuspicion(2);
   }
   refreshActionMenu();
 }
@@ -764,6 +867,11 @@ function actionRoofKey(){
   if(player.flags.roofKey){ toast('もう鍵は持っている。'); return; }
   player.flags.roofKey=true;
   toast('引き出しの奥に『屋上の鍵』を見つけた。');
+}
+function actionPickupExtinguisher(propRef){
+  player.extinguisher=(player.extinguisher||0)+1;
+  toast('『'+EXTINGUISHER.name+'』を手に入れた(所持数 '+player.extinguisher+')');
+  if(propRef){ propRef.marker.visible=false; propRef.cooldown=90; }
 }
 
 /* ---------------- 時間の進行 ---------------- */
@@ -987,6 +1095,12 @@ function buildActionsFor(target){
       acts.push({label:'運ぶ',sub:'旧倉庫まで連れて行く',onClick:function(){ actionCarry(npc); }});
       return acts;
     }
+    if(npc.blinded){
+      acts.push({label:'（消火器で視界を奪って足止め中……）',sub:'約'+Math.ceil(npc.blindT)+'秒',disabled:true,onClick:function(){}});
+    } else {
+      acts.push({label:EXTINGUISHER.icon+' 消火器を吹きかける',sub:'所持:'+(player.extinguisher||0)+'本／正面からでも可・気絶はしない',
+        disabled:(player.extinguisher||0)<=0,onClick:function(){ actionSpray(npc); }});
+    }
     if(npc.key==='hinata'&&!npc.faint){
       acts.push({label:'贈り物を渡す',sub:giftSubLabel(),disabled:totalGifts()===0,
         onClick:function(){ openGiftChoice(npc); }});
@@ -1008,6 +1122,7 @@ function buildActionsFor(target){
   const p=target.prop;
   if(p.type==='weapon') return [{label:p.label,onClick:function(){ actionPickupWeapon(p.key); p.picked=true; if(p.marker) p.marker.visible=false; }}];
   if(p.type==='gift') return [{label:p.label,onClick:function(){ actionPickupGift(p.key,p); }}];
+  if(p.type==='extinguisher') return [{label:p.label,onClick:function(){ actionPickupExtinguisher(p); }}];
   if(p.type==='board') return [{label:'噂を流す(ひなの)',disabled:hinanoState.transferred,onClick:function(){ actionRumor('hinano'); }}];
   if(p.type==='desk') return SUBJECTS.map(function(s){
     return {label:'勉強:'+s,sub:'理解度 '+Math.round(player.grades[s]),onClick:function(){ actionStudy(s); }};
@@ -1117,6 +1232,23 @@ function bindJoystick(baseId,stickId,onMove,onEnd){
   window.addEventListener('pointercancel',release);
 }
 
+/* 押している間だけONになるスマホ用ボタン(ダッシュ/しゃがみ等)の共通バインド。
+   ジョイスティックと同じくpointerIdで絞り込み、複数指の同時操作で
+   混線しないようにする */
+function bindHoldButton(el,onChange){
+  let held=false,heldId=null;
+  function setOn(v){ held=v; el.classList.toggle('on',v); onChange(v); }
+  el.addEventListener('pointerdown',function(e){
+    if(held) return;
+    heldId=e.pointerId; setOn(true); e.preventDefault();
+  });
+  function release(e){ if(e.pointerId!==heldId) return; heldId=null; setOn(false); }
+  el.addEventListener('pointerup',release);
+  el.addEventListener('pointercancel',release);
+  el.addEventListener('pointerleave',release);
+}
+let mobileDash=false, mobileSneak=false;
+
 function updatePlayer(dt){
   let mx=0,mz=0;
   if(keys['w']||keys['arrowup']) mz-=1;
@@ -1124,14 +1256,15 @@ function updatePlayer(dt){
   if(keys['a']||keys['arrowleft']) mx-=1;
   if(keys['d']||keys['arrowright']) mx+=1;
   if(Math.abs(moveVec.x)>0.12||Math.abs(moveVec.y)>0.12){ mx=moveVec.x; mz=moveVec.y; }
-  player.sneak=!!keys['q'];
+  player.sneak=!!keys['q']||mobileSneak;
   const len=Math.hypot(mx,mz);
   let moving=false;
+  const dashing=keys['shift']||mobileDash;
   if(len>0.08){
     mx/=len; mz/=len;
     const fx = -mx*Math.cos(camYaw) - mz*Math.sin(camYaw);
     const fz = mx*Math.sin(camYaw) - mz*Math.cos(camYaw);
-    const spd = (keys['shift']?9.4:6.1) * (player.sneak?0.55:1) * (player.carrying?0.55:1);
+    const spd = (dashing?9.4:6.1) * (player.sneak?0.55:1) * (player.carrying?0.55:1);
     const nx=playerObj.position.x+fx*spd*dt, nz=playerObj.position.z+fz*spd*dt;
     if(!blocked(nx,playerObj.position.z,0.42)) playerObj.position.x=nx;
     if(!blocked(playerObj.position.x,nz,0.42)) playerObj.position.z=nz;
@@ -1140,7 +1273,7 @@ function updatePlayer(dt){
   }
   player.x=playerObj.position.x; player.z=playerObj.position.z;
   playerObj.scale.y=player.sneak?0.82:1;
-  animateWalk(playerObj,dt,moving,keys['shift']?1.5:1);
+  animateWalk(playerObj,dt,moving,dashing?1.5:1);
   const aura=playerObj.userData.aura;
   aura.visible=player.possession>=30;
   if(aura.visible) aura.material.opacity=0.14+0.34*(player.possession/100);
@@ -1230,6 +1363,8 @@ async function boot(useContinue){
   bindCameraDrag(renderer.domElement);
   bindJoystick('joyL','stickL',function(dx,dy){ moveVec.x=dx; moveVec.y=dy; },function(){ moveVec.x=0; moveVec.y=0; });
   bindJoystick('joyR','stickR',function(dx,dy){ lookVec.x=dx; lookVec.y=dy; },function(){ lookVec.x=0; lookVec.y=0; });
+  bindHoldButton(document.getElementById('dashBtn'),function(v){ mobileDash=v; });
+  bindHoldButton(document.getElementById('sneakBtn'),function(v){ mobileSneak=v; });
   clockObj=new THREE.Clock();
   updateMeters();
   layoutMobileHUD();

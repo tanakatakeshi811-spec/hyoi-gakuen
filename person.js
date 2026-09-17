@@ -31,31 +31,41 @@ function loadGLTF(url){
     new THREE.GLTFLoader().load(url,resolve,undefined,reject);
   });
 }
-let TREE_TEMPLATE=null;
+let TREE_TEMPLATE=null, DESK_TEMPLATE=null, BLACKBOARD_TEMPLATE=null, BOOKCASE_TEMPLATE=null;
+function calmMaterials(root){
+  // このシーンの2灯ライティング(ヘミスフィア+ディレクショナル、IBLなし)だと
+  // metalness高めのPBRマテリアルは暗く沈むため、他のオブジェクトと馴染むように
+  // 質感を落ち着かせる(色・テクスチャ自体は変更しない)
+  root.traverse(function(o){
+    if(!o.isMesh) return;
+    o.castShadow=true; o.receiveShadow=true;
+    const arr=Array.isArray(o.material)?o.material:[o.material];
+    arr.forEach(function(m){ m.metalness=0.05; m.roughness=1.0; });
+  });
+}
 function preloadCharacterModels(){
   if(CHAR_MODELS_PROMISE) return CHAR_MODELS_PROMISE;
   CHAR_MODELS_PROMISE = Promise.all([
     loadGLTF('assets/models/man.glb'),
     loadGLTF('assets/models/woman.glb'),
     loadGLTF('assets/models/tree.glb'),
+    loadGLTF('assets/models/desk.glb'),
+    loadGLTF('assets/models/blackboard.glb'),
+    loadGLTF('assets/models/bookcase.glb'),
   ]).then(function(results){
-    const manGltf=results[0], womanGltf=results[1], treeGltf=results[2];
+    const manGltf=results[0], womanGltf=results[1], treeGltf=results[2],
+      deskGltf=results[3], blackboardGltf=results[4], bookcaseGltf=results[5];
     CHAR_TEMPLATES = {
       male:  {scene:manGltf.scene,   animations:manGltf.animations,
         scale:TARGET_HEIGHT.male/RAW_HEIGHT.male},
       female:{scene:womanGltf.scene, animations:womanGltf.animations,
         scale:TARGET_HEIGHT.female/RAW_HEIGHT.female},
     };
-    treeGltf.scene.traverse(function(o){
-      if(!o.isMesh) return;
-      o.castShadow=true; o.receiveShadow=true;
-      // このシーンの2灯ライティング(ヘミスフィア+ディレクショナル、IBLなし)だと
-      // metalness高めのPBRマテリアルは暗く沈むため、他のオブジェクトと馴染むように
-      // 質感を落ち着かせる(色・テクスチャ自体は変更しない)
-      const arr=Array.isArray(o.material)?o.material:[o.material];
-      arr.forEach(function(m){ m.metalness=0.05; m.roughness=1.0; });
-    });
+    [treeGltf.scene,deskGltf.scene,blackboardGltf.scene,bookcaseGltf.scene].forEach(calmMaterials);
     TREE_TEMPLATE=treeGltf.scene;
+    DESK_TEMPLATE=deskGltf.scene;
+    BLACKBOARD_TEMPLATE=blackboardGltf.scene;
+    BOOKCASE_TEMPLATE=bookcaseGltf.scene;
     return CHAR_TEMPLATES;
   });
   return CHAR_MODELS_PROMISE;
@@ -67,6 +77,34 @@ function makeTreeModel(){
   const rawH=7.264785291764521, targetH=5.0;
   t.scale.setScalar(targetH/rawH);
   return t;
+}
+/* 教室の机(既製3Dモデル、CC-BY。出典はassets/CREDITS.md参照)。当たり判定は
+   持たない見た目だけの飾りで、既存のグリッド衝突判定(壁のみ)は変更しない。
+   モデル自体の原点が(床ではなく)高さ方向の中央にあるため、外側にGroupを
+   一枚かぶせて「原点=接地面」になるよう底上げしてから返す */
+const DESK_RAW_MIN_Y=-0.6491820216178894, DESK_SCALE=0.9;
+function makeDeskModel(){
+  if(!DESK_TEMPLATE) return null;
+  const inner=DESK_TEMPLATE.clone(true);
+  inner.scale.setScalar(DESK_SCALE);
+  inner.position.y=-DESK_RAW_MIN_Y*DESK_SCALE;
+  const wrap=new THREE.Group();
+  wrap.add(inner);
+  return wrap;
+}
+/* 黒板(既製3Dモデル、CC-BY。出典はassets/CREDITS.md参照) */
+function makeBlackboardModel(){
+  if(!BLACKBOARD_TEMPLATE) return null;
+  const b=BLACKBOARD_TEMPLATE.clone(true);
+  b.scale.set(3.3,3.3,1);
+  return b;
+}
+/* 図書室の本棚(既製3Dモデル、CC0) */
+function makeBookcaseModel(){
+  if(!BOOKCASE_TEMPLATE) return null;
+  const b=BOOKCASE_TEMPLATE.clone(true);
+  b.scale.setScalar(0.85);
+  return b;
 }
 
 function person(opt){
@@ -132,13 +170,21 @@ function person(opt){
   /* 目撃者マーク(!) */
   const witnessMark=new THREE.Mesh(new THREE.ConeGeometry(0.12,0.3,6),LM(0xf2c14e));
   witnessMark.position.set(0,H+0.4,0); witnessMark.visible=false; g.add(witnessMark);
+  /* 消火器で視界を奪われている間の目印(顔の周りの白い霧っぽい塊) */
+  const blindMark=new THREE.Group();
+  const puffMat=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.55,depthWrite:false});
+  [[0,0,0.12],[0.12,0.05,-0.05],[-0.11,-0.04,-0.04]].forEach(function(o){
+    const puff=new THREE.Mesh(new THREE.SphereGeometry(0.17,8,6),puffMat);
+    puff.position.set(o[0],o[1],o[2]); blindMark.add(puff);
+  });
+  blindMark.position.y=H*0.92; blindMark.visible=false; g.add(blindMark);
   /* 接地影 */
   const blob=new THREE.Mesh(new THREE.CircleGeometry(0.62,16),
     new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0.3,depthWrite:false}));
   blob.rotation.x=-Math.PI/2; blob.position.y=0.03; g.add(blob);
 
   g.userData={mixer:mixer,actions:actions,currentAction:actions.idle||null,
-    aura:aura,faintMark:faintMark,bindMark:bindMark,witnessMark:witnessMark,
+    aura:aura,faintMark:faintMark,bindMark:bindMark,witnessMark:witnessMark,blindMark:blindMark,
     faint:false,H:H};
   return g;
 }
