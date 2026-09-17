@@ -26,15 +26,26 @@ function mergeGeos(list){
   const nis=list.map(function(g){ return g.toNonIndexed(); });
   let n=0; nis.forEach(function(g){ n+=g.attributes.position.count; });
   const P=new Float32Array(n*3), N=new Float32Array(n*3);
+  /* 2026-09-17続報8で発見: 壁・床にテクスチャを貼るまでは単色マテリアル
+     だったため気づかなかったが、このマージ処理はposition/normalしか
+     引き継いでおらずuv属性を丸ごと捨てていた。UV無しの頂点は無効化された
+     頂点属性(=0扱い)になり、シェーダーが常にテクスチャの(0,0)ピクセルだけを
+     サンプリングし続けるため、壁も床も「1ピクセル分の色で塗りつぶされた
+     単色」に見えてしまう(=模様が一切出ない)。uv属性もPosition/normalと
+     同様にコピーして解消する */
+  const hasUV=nis.every(function(g){ return !!g.attributes.uv; });
+  const UV=hasUV?new Float32Array(n*2):null;
   let o=0;
   nis.forEach(function(g){
     P.set(g.attributes.position.array,o*3);
     N.set(g.attributes.normal.array,o*3);
+    if(hasUV) UV.set(g.attributes.uv.array,o*2);
     o+=g.attributes.position.count; g.dispose();
   });
   const out=new THREE.BufferGeometry();
   out.setAttribute('position',new THREE.BufferAttribute(P,3));
   out.setAttribute('normal',new THREE.BufferAttribute(N,3));
+  if(hasUV) out.setAttribute('uv',new THREE.BufferAttribute(UV,2));
   return out;
 }
 
@@ -50,23 +61,89 @@ let sceneObstacleMeshes=[];
 const camColliders=[];
 const camRaycaster=new THREE.Raycaster();
 
+/* ---------------- テクスチャ(壁/床/天井) ----------------
+   しゅんりさんの「壁も床も天井も一色ずつなのに意味わかんない」という指摘を
+   受けて、Poly Haven(https://polyhaven.com/、CC0)のテクスチャ画像を
+   assets/textures に保存して使う(Blender未起動でも直接HTTPでDLできる
+   CC0テクスチャサイトという前回までのノウハウを踏襲)。用途(教室の床/廊下の
+   床/体育館の床/内壁/外壁/天井)ごとに別のテクスチャを割り当て、全部同じ
+   使い回しにならないようにする。出典はassets/CREDITS.md参照 */
+const texLoader=new THREE.TextureLoader();
+const TEX_URLS={
+  wallInterior:'assets/textures/wall_interior.jpg',   // 教室・廊下の内壁(白い漆喰)
+  wallExterior:'assets/textures/wall_exterior.jpg',   // 校舎の外壁(ベージュのモルタル)
+  floorClassroom:'assets/textures/floor_classroom.jpg', // 教室の床(木目のラミネート)
+  floorCorridor:'assets/textures/floor_corridor.jpg',   // 廊下・昇降口の床(校内でよく見る幾何学模様のリノリウム)
+  floorGym:'assets/textures/floor_gym.jpg',             // 体育館の床(フローリング)
+  floorGeneric:'assets/textures/floor_generic.jpg',     // それ以外の特別教室の床(タイル)
+  ceiling:'assets/textures/ceiling.jpg',                // 天井(全室共通)
+};
+/* 用途ごとにテクスチャを個別ロードしてMeshPhongMaterialを返す。RepeatWrapping+
+   repeatでタイル貼りし、間延びしないようにする(各グリッドタイルのBoxGeometry
+   は既定でUVが0〜1になっているため、repeatをそのまま「1マスあたりの
+   繰り返し回数」として使える) */
+function texMat(key,rep){
+  const tex=texLoader.load(TEX_URLS[key]);
+  tex.wrapS=THREE.RepeatWrapping; tex.wrapT=THREE.RepeatWrapping;
+  tex.repeat.set(rep,rep);
+  return new THREE.MeshPhongMaterial({map:tex,color:0xffffff,shininess:6,specular:0x1c1c1c});
+}
+/* 単一の大きな平面(校舎の屋根など、グリッドの1マス単位ではないメッシュ)用。
+   面の実サイズ(ワールド単位)を渡して、1テクスチャあたり約tileSize単位に
+   なるようrepeatを自動計算する */
+function texMatSized(key,worldW,worldD,tileSize){
+  const tex=texLoader.load(TEX_URLS[key]);
+  tex.wrapS=THREE.RepeatWrapping; tex.wrapT=THREE.RepeatWrapping;
+  tex.repeat.set(worldW/(tileSize||3), worldD/(tileSize||3));
+  return new THREE.MeshPhongMaterial({map:tex,color:0xffffff,shininess:6,specular:0x1c1c1c});
+}
+function tileRoomKey(c,r){
+  for(const rm of ROOMS){ if(c>=rm.c0&&c<=rm.c1&&r>=rm.r0&&r<=rm.r1) return rm.key; }
+  return null;
+}
+/* 部屋の種類ごとに床材のカテゴリを振り分ける(教室/廊下/体育館/その他の
+   特別教室)。ドアの隙間タイル(どのROOMSにも属さない床)はgenericに含める */
+function floorCategoryFor(c,r){
+  const k=tileRoomKey(c,r);
+  if(k==='homeroom'||k==='classB'||k==='class2a') return 'classroom';
+  if(k==='corridorN'||k==='corridorE'||k==='clubHall'||k==='entrance') return 'corridor';
+  if(k==='gym') return 'gym';
+  return 'generic';
+}
+
 function buildIndoor(){
-  const wallGeos=[], floorGeos=[];
+  const wallGeosInt=[], wallGeosExt=[];
+  const floorGeos={classroom:[],corridor:[],gym:[],generic:[]};
   for(let r=0;r<ROWS;r++){
     for(let c=0;c<COLS;c++){
       const isW=grid[r][c]==='#';
       const g=new THREE.BoxGeometry(TILE, isW?3.4:0.2, TILE);
       g.translate(c*TILE+TILE/2, isW?1.7:-0.1, r*TILE+TILE/2);
-      (isW?wallGeos:floorGeos).push(g);
+      if(isW){
+        const isExt=(c===0||c===COLS-1||r===0||r===ROWS-1);
+        (isExt?wallGeosExt:wallGeosInt).push(g);
+      } else {
+        floorGeos[floorCategoryFor(c,r)].push(g);
+      }
     }
   }
-  const wallMesh=new THREE.Mesh(mergeGeos(wallGeos), PM(0xdcd3c0,10,0x222222));
-  wallMesh.castShadow=true; wallMesh.receiveShadow=true;
-  scene.add(wallMesh);
-  camColliders.push(wallMesh);
-  const floorMesh=new THREE.Mesh(mergeGeos(floorGeos), LM(0xb8ad94));
-  floorMesh.receiveShadow=true;
-  scene.add(floorMesh);
+  const wallIntMesh=new THREE.Mesh(mergeGeos(wallGeosInt), texMat('wallInterior',1.4));
+  wallIntMesh.castShadow=true; wallIntMesh.receiveShadow=true;
+  scene.add(wallIntMesh);
+  camColliders.push(wallIntMesh);
+  const wallExtMesh=new THREE.Mesh(mergeGeos(wallGeosExt), texMat('wallExterior',1.4));
+  wallExtMesh.castShadow=true; wallExtMesh.receiveShadow=true;
+  scene.add(wallExtMesh);
+  camColliders.push(wallExtMesh);
+
+  const FLOOR_TEX_KEY={classroom:'floorClassroom',corridor:'floorCorridor',gym:'floorGym',generic:'floorGeneric'};
+  const FLOOR_REPEAT={classroom:2.2,corridor:1.6,gym:2.6,generic:2.0};
+  Object.keys(floorGeos).forEach(function(cat){
+    if(!floorGeos[cat].length) return;
+    const floorMesh=new THREE.Mesh(mergeGeos(floorGeos[cat]), texMat(FLOOR_TEX_KEY[cat],FLOOR_REPEAT[cat]));
+    floorMesh.receiveShadow=true;
+    scene.add(floorMesh);
+  });
   /* 部屋名ラベル */
   ROOMS.forEach(function(rm){
     const c=roomCenter(rm.key);
@@ -85,7 +162,8 @@ function buildIndoor(){
 function buildSchoolExterior(){
   const x0=0,x1=COLS*TILE, z0=0,z1=ROWS*TILE, wallTop=3.4;
   const cx=(x0+x1)/2, cz=(z0+z1)/2;
-  const roof=new THREE.Mesh(new THREE.BoxGeometry(x1-x0+3,0.4,z1-z0+3), PM(0x565f57,8,0x1a1a1a));
+  const roofW=x1-x0+3, roofD=z1-z0+3;
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(roofW,0.4,roofD), texMatSized('ceiling',roofW,roofD,3.2));
   roof.position.set(cx,wallTop+0.2,cz);
   roof.castShadow=true; roof.receiveShadow=true;
   scene.add(roof);
@@ -272,6 +350,95 @@ function buildRoof(){
   const label=makeLabelSprite('屋上'); label.position.set(cx,4,cz); scene.add(label);
 }
 
+/* ---------------- 2階・3階 ----------------
+   しゅんりさん要望「校舎をもう少し広く3階建てに」。既存の屋上と同じ設計
+   パターン(校舎本体から離れた場所に独立した小さな建物を置き、階段プロップで
+   ワープする)を踏襲する。当たり判定はグリッドではなくOBSTACLES配列ベース
+   (buildShedと同じ方式)。西側=踊り場(上り/下りの階段)、東側=1部屋の
+   仕切りで、間の壁に開口部(ドア)を設ける */
+function buildUpperFloorRoom(offset,floorLabel,roomLabel,floorTexKey,wallHeight){
+  const x0=offset.x, x1=offset.x+48, z0=offset.z, z1=offset.z+24;
+  const midX=offset.x+24, doorZ0=offset.z+8, doorZ1=offset.z+16;
+  const h=wallHeight||3.0;
+  const wallMat=texMat('wallInterior',1.3);
+  /* addObstacleBoxRaw()のOBSTACLES登録は「max(w,d)/2を半径とする円」という
+     粗い近似(buildShedの小部屋では問題にならなかった)なので、48単位もある
+     長い外周壁をそのまま1本で渡すと半径24の巨大な円になり、部屋の奥まで
+     何もかもブロックしてしまう(headless Chromeの実移動テストで発覚)。
+     長い壁は正方形に近いセグメントに分割してから登録する */
+  function wall(cx,cz,w,d){
+    const SEG=3.2;
+    if(w>=d){
+      const n=Math.max(1,Math.round(w/SEG)), segW=w/n;
+      for(let i=0;i<n;i++) addObstacleBoxRaw(cx-w/2+segW*(i+0.5),cz,segW,h,d,wallMat);
+    } else {
+      const n=Math.max(1,Math.round(d/SEG)), segD=d/n;
+      for(let i=0;i<n;i++) addObstacleBoxRaw(cx,cz-d/2+segD*(i+0.5),w,h,segD,wallMat);
+    }
+  }
+  // 外周4面
+  wall((x0+x1)/2, z0, x1-x0, 0.4);
+  wall((x0+x1)/2, z1, x1-x0, 0.4);
+  wall(x0, (z0+z1)/2, 0.4, z1-z0);
+  wall(x1, (z0+z1)/2, 0.4, z1-z0);
+  // 仕切り壁(中央にドア開口部を残す)
+  wall(midX, (z0+doorZ0)/2, 0.4, doorZ0-z0);
+  wall(midX, (doorZ1+z1)/2, 0.4, z1-doorZ1);
+  // 床(西=踊り場/生徒会側=特別教室)。用途に応じたテクスチャを分ける
+  const floorA=new THREE.Mesh(new THREE.PlaneGeometry(midX-x0,z1-z0),texMat('floorCorridor',1.6));
+  floorA.rotation.x=-Math.PI/2; floorA.position.set((x0+midX)/2,0,(z0+z1)/2); floorA.receiveShadow=true; scene.add(floorA);
+  const floorB=new THREE.Mesh(new THREE.PlaneGeometry(x1-midX,z1-z0),texMat(floorTexKey,2.0));
+  floorB.rotation.x=-Math.PI/2; floorB.position.set((midX+x1)/2,0,(z0+z1)/2); floorB.receiveShadow=true; scene.add(floorB);
+  // 天井(緊急修正の教訓通り、必ずcamCollidersへ登録してカメラの壁抜け防止に対応させる)
+  const roofW=x1-x0+1, roofD=z1-z0+1;
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(roofW,0.4,roofD), texMatSized('ceiling',roofW,roofD,3));
+  roof.position.set((x0+x1)/2,h+0.2,(z0+z1)/2);
+  roof.castShadow=true; roof.receiveShadow=true; scene.add(roof);
+  camColliders.push(roof);
+  // ラベル(1階の部屋名ラベルと同じくy=4.4付近=頭上に置く。プレイヤーの
+  // 目線の高さ(h-0.4=2.6)に置いていた旧版は、近づいた時にdepthTest:false の
+  // スプライトの縁が画面いっぱいに大きく映り込み「紫の帯が画面を横切る」
+  // ように見える不具合があった。headless Chromeのスクリーンショットで発覚)
+  const lFloor=makeLabelSprite(floorLabel); lFloor.position.set((x0+midX)/2,h+1.4,(z0+z1)/2); scene.add(lFloor);
+  const lRoom=makeLabelSprite(roomLabel); lRoom.position.set((midX+x1)/2,h+1.4,(z0+z1)/2); scene.add(lRoom);
+  return {x0:x0,x1:x1,z0:z0,z1:z1,midX:midX};
+}
+function buildFloor2(){
+  const b=buildUpperFloorRoom(FLOOR2_OFFSET,'2階 廊下','2年C組','floorClassroom',3.0);
+  // 東側(2年C組)を空き教室パターン(机+黒板)で飾る
+  const board=makeBlackboardModel();
+  if(board){ board.position.set((b.midX+b.x1)/2,2.0,b.z0+0.2); scene.add(board); }
+  const marginX=3, startZ=b.z0+6, endZ=b.z1-3, cols=3, rows=2;
+  const usableW=(b.x1-b.midX)-marginX*2;
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      const desk=makeDeskModel(); if(!desk) continue;
+      desk.position.set(b.midX+marginX+(cols>1?usableW/(cols-1)*c:0),0,startZ+(rows>1?(endZ-startZ)/(rows-1)*r:0));
+      desk.rotation.y=Math.PI;
+      scene.add(desk);
+    }
+  }
+  // 西側(廊下/踊り場)にロッカーを少し置いて寂しくならないようにする
+  [b.z0+4,b.z0+10].forEach(function(zz){
+    const lk=makeLockerModel(); if(!lk) return;
+    lk.position.set(b.x0+1.2,0,zz); lk.rotation.y=Math.PI/2; scene.add(lk);
+  });
+}
+function buildFloor3(){
+  const b=buildUpperFloorRoom(FLOOR3_OFFSET,'3階 廊下','資料室','floorGeneric',3.0);
+  // 東側(資料室)を本棚+丸テーブルで飾る
+  for(let i=0;i<3;i++){
+    const bc=makeBookcaseModel(); if(!bc) continue;
+    bc.position.set(b.x1-0.8,0,b.z0+3.5+i*5); bc.rotation.y=-Math.PI/2; scene.add(bc);
+  }
+  const table=makeRoundTableModel();
+  if(table){ table.position.set((b.midX+b.x1)/2-1,0,b.z1-5); scene.add(table); }
+  [b.z0+4,b.z0+10].forEach(function(zz){
+    const lk=makeLockerModel(); if(!lk) return;
+    lk.position.set(b.x0+1.2,0,zz); lk.rotation.y=Math.PI/2; scene.add(lk);
+  });
+}
+
 /* ---------------- 当たり判定 ---------------- */
 function blocked(x,z,rad){
   rad=rad||0.4;
@@ -283,7 +450,7 @@ function blocked(x,z,rad){
     }
     return false;
   }
-  if(inZone(x,z,OUTDOOR_ZONE)||inZone(x,z,ROOF_ZONE)){
+  if(inZone(x,z,OUTDOOR_ZONE)||inZone(x,z,ROOF_ZONE)||inZone(x,z,FLOOR2_ZONE)||inZone(x,z,FLOOR3_ZONE)){
     for(let i=0;i<OBSTACLES.length;i++){
       const o=OBSTACLES[i];
       if(dist2(x,z,o.x,o.z) < (o.r+rad)*(o.r+rad)) return true;
@@ -309,7 +476,16 @@ function initScene(){
   renderer.setSize(innerWidth,innerHeight);
   renderer.shadowMap.enabled=true;
 
-  const hemi=new THREE.HemisphereLight(0xffffff,0x445033,0.75); scene.add(hemi);
+  /* 2026-09-17続報8: 壁・床を単色から写真テクスチャに変えたところ、元の
+     ライティング(ヘミスフィア0.75+ディレクショナル0.9)では廊下の側壁が
+     太陽と逆側を向く面が真っ黒に近いほど暗く沈み、「学校らしく見える」
+     どころか模様がほぼ判別できないほどだったのをスクリーンショットで発見。
+     単色の明るいベージュだった頃は気にならなかった暗さが、写真の実物大の
+     質感になったことで目立つようになったため、底上げの環境光(Ambient)を
+     追加+ヘミスフィアも少し強める(directional側は方向性の陰影を保つため
+     そのまま) */
+  const hemi=new THREE.HemisphereLight(0xffffff,0x445033,1.05); scene.add(hemi);
+  const ambient=new THREE.AmbientLight(0xffffff,0.32); scene.add(ambient);
   window._sunLight=new THREE.DirectionalLight(0xffffff,0.9);
   window._sunLight.position.set(40,60,20);
   window._sunLight.castShadow=true;
@@ -325,6 +501,8 @@ function initScene(){
   buildSchoolExterior();
   buildOutdoor();
   buildRoof();
+  buildFloor2();
+  buildFloor3();
   buildProps();
   buildSchoolDecor();
 
@@ -413,6 +591,16 @@ function buildProps(){
   addMarker(STAIRS_UP.x,STAIRS_UP.z,0xbfa6ff,'cyl');
   PROPS.push({type:'stairsDown',x:STAIRS_DOWN.x,z:STAIRS_DOWN.z,label:'校舎へ戻る'});
   addMarker(STAIRS_DOWN.x,STAIRS_DOWN.z,0xbfa6ff,'cyl');
+
+  /* 2026-09-17続報8: 3階建て化。1階⇔2階⇔3階の階段(鍵は不要、屋上とは別系統) */
+  PROPS.push({type:'stairs2up',x:STAIRS_2F_UP.x,z:STAIRS_2F_UP.z,label:'2階へ上がる'});
+  addMarker(STAIRS_2F_UP.x,STAIRS_2F_UP.z,0x8fd6ff,'cyl');
+  PROPS.push({type:'stairs2down',x:STAIRS_2F_DOWN.x,z:STAIRS_2F_DOWN.z,label:'1階へ下りる'});
+  addMarker(STAIRS_2F_DOWN.x,STAIRS_2F_DOWN.z,0x8fd6ff,'cyl');
+  PROPS.push({type:'stairs3up',x:STAIRS_3F_UP.x,z:STAIRS_3F_UP.z,label:'3階へ上がる'});
+  addMarker(STAIRS_3F_UP.x,STAIRS_3F_UP.z,0x8fd6ff,'cyl');
+  PROPS.push({type:'stairs3down',x:STAIRS_3F_DOWN.x,z:STAIRS_3F_DOWN.z,label:'2階へ下りる'});
+  addMarker(STAIRS_3F_DOWN.x,STAIRS_3F_DOWN.z,0x8fd6ff,'cyl');
 
   PROPS.push({type:'shed',x:SHED.x,z:SHED.z+SHED.d/2+1.5,label:'旧倉庫'});
 
@@ -649,11 +837,14 @@ const NPC_KEYS=['hinata','hinano','kuroda','kiryuu','mio','nayuta','mei','janito
 /* 2026-09-17続報7: 生徒89人化。固有キャラ(NPC_KEYS、CHARに定義)+
    自動生成した82人(data.jsのGENERIC_STUDENTS)を同じロジックで組み立てる
    ため、共通処理をaddNpc()に切り出した */
+/* 2026-09-17続報8: 恋愛対象(陽向)=ピンク、ライバル(ひなの)=紫のハイライト色 */
+const AFFINITY_COLOR={hinata:0xff5fa8, hinano:0x9a4fe0};
 function addNpc(key,def){
   const rig=person(def.look);
   const home=jitterPt(roomCenter(def.home),key);
   rig.position.set(home.x,0,home.z);
   scene.add(rig);
+  if(AFFINITY_COLOR[key]) addAffinityAura(rig,AFFINITY_COLOR[key]);
   /* 2026-09-18 密集緩和: NPCごとに安定した「単独行動(トイレ等)に出る
      確率」と「移動タイミングの個体差(数秒〜十数秒のズレ)」をキー文字列
      からのハッシュで決定的に割り当てる。89人分を手作業で書かず、
@@ -1643,6 +1834,27 @@ function buildActionsFor(target){
       playerObj.position.set(STAIRS_UP.x+1.5,0,STAIRS_UP.z+1);
     }}];
   }
+  /* 2026-09-17続報8: 3階建て化。屋上と違い鍵は不要(常時通行可能) */
+  if(p.type==='stairs2up'){
+    return [{label:'2階へ上がる',onClick:function(){
+      playerObj.position.set(STAIRS_2F_DOWN.x+1.5,0,STAIRS_2F_DOWN.z+1);
+    }}];
+  }
+  if(p.type==='stairs2down'){
+    return [{label:'1階へ下りる',onClick:function(){
+      playerObj.position.set(STAIRS_2F_UP.x+1.5,0,STAIRS_2F_UP.z+1);
+    }}];
+  }
+  if(p.type==='stairs3up'){
+    return [{label:'3階へ上がる',onClick:function(){
+      playerObj.position.set(STAIRS_3F_DOWN.x+1.5,0,STAIRS_3F_DOWN.z+1);
+    }}];
+  }
+  if(p.type==='stairs3down'){
+    return [{label:'2階へ下りる',onClick:function(){
+      playerObj.position.set(STAIRS_3F_UP.x+1.5,0,STAIRS_3F_UP.z+1);
+    }}];
+  }
   return [];
 }
 function refreshActionMenu(){
@@ -1886,6 +2098,23 @@ function resolveCameraCollision(from,idealPos){
   }
   return idealPos.clone();
 }
+/* 2026-09-17続報8: 恋愛対象(陽向)のハイライトの脈動更新+接近するほど
+   画面がピンクに染まる演出。ライバル(ひなの)は画面演出の対象外(ハイライトの
+   紫色だけで区別できれば十分、というコーディネーターの依頼どおり) */
+function updateAffinityFX(){
+  const t=clockObj.elapsedTime;
+  const hinata=npcByKey('hinata'), hinano=npcByKey('hinano');
+  if(hinata) updateAffinityAura(hinata.rig,t);
+  if(hinano) updateAffinityAura(hinano.rig,t);
+  let op=0;
+  if(hinata && !hinata.faint && !hinata.bagged && !hinata.captive && !hinata.transferred){
+    const d=Math.hypot(playerObj.position.x-hinata.x,playerObj.position.z-hinata.z);
+    const MAX_R=16, MIN_R=2.5;
+    op=clamp(1-(d-MIN_R)/(MAX_R-MIN_R),0,1);
+  }
+  const overlay=document.getElementById('affinityOverlay');
+  if(overlay) overlay.style.opacity=op.toFixed(3);
+}
 function updateCamera(){
   // 縦長スマホ(aspect<1)はfovを少し広げるだけだと近くの床とキャラで画面が
   // 埋まりすぎるので、狭いほどカメラを少し後ろに引いて視界の圧迫感を抑える
@@ -1917,6 +2146,7 @@ function animate(){
     PROPS.forEach(function(p){
       if(p.cooldown){ p.cooldown-=dt; if(p.cooldown<=0){ p.cooldown=0; if(p.marker) p.marker.visible=true; } }
     });
+    updateAffinityFX();
   }
   /* 視点回転(camYaw/camPitch)はマウス/タッチのpointermoveハンドラが直接
      書き換える方式に統一したので、ここでの毎フレーム加算は不要(旧joyRの
