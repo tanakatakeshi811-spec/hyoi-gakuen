@@ -31,7 +31,8 @@
   <div id="loadingMsg" style="font-size:12px;color:#c9b8ff">3Dモデルを読み込み中…</div>
   <div class="panel" style="font-size:11px;color:#9d92c0">
     操作: WASD/矢印で移動、マウスドラッグで視点回転、Eで調べる/話す、Qでしゃがみ(隠密)、Shiftでダッシュ。
-    スマホは画面下の仮想スティック(左:移動／右:視点)+ダッシュ/しゃがむボタンに対応。
+    スマホは画面左半分をドラッグすると移動スティックが指の位置に出現、右半分のドラッグで視点操作、
+    右下のボタン列(ダッシュ/しゃがむ/アクション)に対応。
   </div>
 </div>
 
@@ -82,8 +83,11 @@
     <button id="sneakBtn" class="modbtn"><span>しゃがむ</span><b>Q</b></button>
   </div>
 
-  <div id="joyL"><div class="stickbase"></div><div class="stick" id="stickL"></div></div>
-  <div id="joyR"><div class="stickbase"></div><div class="stick" id="stickR"></div></div>
+  <!-- 2026-09-17続報3: [[放課後の居残り]]の操作設計を移植。固定コーナーの
+       仮想スティックをやめ、左半分に触れた瞬間その位置にスティックが
+       出現する方式に変更(#joyL/#joyR→#stick/#knobへ差し替え、右スティックは
+       廃止し右半分は視点ドラッグ専用ゾーンにした) -->
+  <div id="stick"><div id="knob"></div></div>
 </div>
 
 <div id="summary">

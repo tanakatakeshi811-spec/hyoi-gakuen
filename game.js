@@ -266,19 +266,12 @@ function updateCameraFov(){
   camera.updateProjectionMatrix();
 }
 
-/* スマホ横画面など仮想スティックの実サイズが変わる環境向けに、スティックの実測
-   高さを--joyhへ反映し、アクションメニュー/インタラクト表示/持ち物バーが
-   スティックに重ならないようCSS側(calc(var(--joyh)...))で底上げする */
-function layoutMobileHUD(){
-  const joyL=document.getElementById('joyL');
-  if(!joyL) return;
-  const visible=getComputedStyle(joyL).display!=='none';
-  const h=visible?joyL.getBoundingClientRect().height:0;
-  document.documentElement.style.setProperty('--joyh',(h>0?h:0)+'px');
-  const wbar=document.getElementById('weaponbar');
-  const wh=wbar?wbar.getBoundingClientRect().height:0;
-  document.documentElement.style.setProperty('--wbh',(wh>0?wh:0)+'px');
-}
+/* 2026-09-17続報3: [[放課後の居残り]]方式(移動スティックと操作ボタン列が
+   左右で完全に分かれていて重ならない)に変えたことで、旧#joyLの実測サイズを
+   CSS変数へ反映して他要素を底上げする処理は不要になった。呼び出し箇所は
+   残しても無害なので関数自体は空で維持(resize/orientationchange時の
+   将来的なレイアウト調整フック用に残置) */
+function layoutMobileHUD(){}
 
 /* ---------------- 小物(インタラクト可能プロップ) ---------------- */
 function addMarker(x,z,color,shape){
@@ -1188,11 +1181,20 @@ window.addEventListener('keydown',function(e){
 window.addEventListener('keyup',function(e){ keys[e.key.toLowerCase()]=false; });
 
 /* 各ハンドラは自分が掴んだpointerIdだけを追跡する(pointerIdでの絞り込みが
-   無いと、両手同時操作=左スティックで移動しながら右スティックで視点操作、
-   のような複数指の同時タッチで指同士の入力が混線するバグになる) */
+   無いと、両手同時操作=移動しながら視点操作、のような複数指の同時タッチで
+   指同士の入力が混線するバグになる)。
+   2026-09-17続報3: [[放課後の居残り]]の操作方式をそのまま移植。固定コーナーの
+   2本の仮想スティック(左移動/右視点)をやめ、画面を左右のゾーンに分けて
+   「左ゾーンに触れた瞬間、その座標にスティックが出現する(#stick/#knob、
+   離すまで基準点は動かさない)」「右ゾーンは見た目を持たない素の視点ドラッグ」
+   という設計に統一した。数値もHoukagoInokoriのindex.html(#stick/placeStick/
+   pointermoveハンドラ)から直接移植: スティック半径STICK_R=56px、
+   デッドゾーン0.14、カーブ指数1.35 */
 let dragging=false,dragId=null,lastPX=0,lastPY=0;
 function bindCameraDrag(el){
+  // デスクトップのマウスドラッグでの視点操作(タッチは下の専用ハンドラが担当)
   el.addEventListener('pointerdown',function(e){
+    if(e.pointerType!=='mouse') return;
     if(dragging) return;
     dragging=true; dragId=e.pointerId; lastPX=e.clientX; lastPY=e.clientY;
   });
@@ -1202,35 +1204,62 @@ function bindCameraDrag(el){
   window.addEventListener('pointermove',function(e){
     if(!dragging||e.pointerId!==dragId) return;
     const dx=e.clientX-lastPX, dy=e.clientY-lastPY; lastPX=e.clientX; lastPY=e.clientY;
-    camYaw-=dx*0.006;
-    camPitch=clamp(camPitch+dy*0.004,-0.3,0.85);
+    /* 感度定数は[[放課後の居残り]]のマウスドラッグ(0.0022/0.0019)と同じ値。
+       符号(上下の向き)はこのゲーム独自のカメラ数式に合わせて2026-09-17の
+       前回セッションで検証済みのものを維持(倒す方向が違う既存バグ修正済み) */
+    camYaw-=dx*0.0022;
+    camPitch=clamp(camPitch+dy*0.0019,-0.3,0.85);
   });
 }
-const moveVec={x:0,y:0}, lookVec={x:0,y:0};
-function bindJoystick(baseId,stickId,onMove,onEnd){
-  const base=document.getElementById(baseId), stick=document.getElementById(stickId);
-  let active=false,activeId=null,startX=0,startY=0;
-  base.addEventListener('pointerdown',function(e){
-    if(active) return;
-    active=true; activeId=e.pointerId;
-    const r=base.getBoundingClientRect(); startX=r.left+r.width/2; startY=r.top+r.height/2;
-    e.preventDefault();
-  });
-  window.addEventListener('pointermove',function(e){
-    if(!active||e.pointerId!==activeId) return;
-    let dx=e.clientX-startX, dy=e.clientY-startY;
-    const d=Math.hypot(dx,dy), max=60;
-    if(d>max){ dx=dx/d*max; dy=dy/d*max; }
-    stick.style.transform='translate('+dx+'px,'+dy+'px)';
-    onMove(dx/max,dy/max);
-  });
-  function release(e){
-    if(!active||e.pointerId!==activeId) return;
-    active=false; activeId=null; stick.style.transform=''; onEnd&&onEnd();
+const moveVec={x:0,y:0};
+const elStick=document.getElementById('stick'),elKnob=document.getElementById('knob');
+let stickPid=null,stickX=0,stickY=0,lookPid=null,lookX=0,lookY=0;
+const STICK_R=56,STICK_DEADZONE=0.14,STICK_CURVE=1.35;
+function isTouchUI(t){
+  return !!(t&&t.closest&&t.closest('button,.pe,.abtn,.wbtn,.modbtn,#title,#summary,#ending'));
+}
+function inStickZone(x){ return x<innerWidth*0.46; }
+function placeStick(x,y){
+  stickX=x; stickY=y;
+  elStick.style.left=(x-75)+'px'; elStick.style.top=(y-75)+'px';
+  elKnob.style.left='45px'; elKnob.style.top='45px';
+  elStick.classList.add('on');
+}
+window.addEventListener('pointerdown',function(e){
+  if(e.pointerType==='mouse') return;
+  if(isTouchUI(e.target)) return;
+  e.preventDefault();
+  if(inStickZone(e.clientX)&&stickPid===null){
+    stickPid=e.pointerId; placeStick(e.clientX,e.clientY);
+  } else if(lookPid===null){
+    lookPid=e.pointerId; lookX=e.clientX; lookY=e.clientY;
   }
-  window.addEventListener('pointerup',release);
-  window.addEventListener('pointercancel',release);
+});
+window.addEventListener('pointermove',function(e){
+  if(e.pointerId===stickPid){
+    let dx=e.clientX-stickX, dy=e.clientY-stickY;
+    let d=Math.hypot(dx,dy);
+    if(d>STICK_R){ dx*=STICK_R/d; dy*=STICK_R/d; d=STICK_R; }
+    elKnob.style.left=(45+dx)+'px'; elKnob.style.top=(45+dy)+'px';
+    const n=d/STICK_R;
+    if(n<STICK_DEADZONE){ moveVec.x=0; moveVec.y=0; }
+    else{
+      const t=(n-STICK_DEADZONE)/(1-STICK_DEADZONE);
+      const curved=Math.pow(t,STICK_CURVE);
+      moveVec.x=dx/d*curved; moveVec.y=dy/d*curved;
+    }
+  } else if(e.pointerId===lookPid){
+    camYaw-=(e.clientX-lookX)*0.0055;
+    camPitch=clamp(camPitch+(e.clientY-lookY)*0.0045,-0.3,0.85);
+    lookX=e.clientX; lookY=e.clientY;
+  }
+});
+function endTouchPtr(e){
+  if(e.pointerId===stickPid){ stickPid=null; moveVec.x=0; moveVec.y=0; elStick.classList.remove('on'); }
+  if(e.pointerId===lookPid) lookPid=null;
 }
+window.addEventListener('pointerup',endTouchPtr);
+window.addEventListener('pointercancel',endTouchPtr);
 
 /* 押している間だけONになるスマホ用ボタン(ダッシュ/しゃがみ等)の共通バインド。
    ジョイスティックと同じくpointerIdで絞り込み、複数指の同時操作で
@@ -1249,26 +1278,37 @@ function bindHoldButton(el,onChange){
 }
 let mobileDash=false, mobileSneak=false;
 
+/* 角度の最短経路での滑らかな追従。[[放課後の居残り]]のangLerp()をそのまま移植 */
+function angLerp(a,b,t){
+  let d=((b-a+Math.PI*3)%(Math.PI*2))-Math.PI;
+  return a+d*t;
+}
 function updatePlayer(dt){
   let mx=0,mz=0;
   if(keys['w']||keys['arrowup']) mz-=1;
   if(keys['s']||keys['arrowdown']) mz+=1;
   if(keys['a']||keys['arrowleft']) mx-=1;
   if(keys['d']||keys['arrowright']) mx+=1;
-  if(Math.abs(moveVec.x)>0.12||Math.abs(moveVec.y)>0.12){ mx=moveVec.x; mz=moveVec.y; }
+  /* 2026-09-17続報3: [[放課後の居残り]]と同じくキー入力とスティック入力を
+     加算合成し、その合成ベクトルの大きさ(mag)で速度を連続的に変える
+     アナログ制御にした(以前はスティックがキー入力を丸ごと上書きする上、
+     閾値を一歩でも超えたら常に最大速度というデジタル制御だった) */
+  mx+=moveVec.x; mz+=moveVec.y;
   player.sneak=!!keys['q']||mobileSneak;
-  const len=Math.hypot(mx,mz);
+  const mag=Math.hypot(mx,mz);
   let moving=false;
   const dashing=keys['shift']||mobileDash;
-  if(len>0.08){
-    mx/=len; mz/=len;
-    const fx = -mx*Math.cos(camYaw) - mz*Math.sin(camYaw);
-    const fz = mx*Math.sin(camYaw) - mz*Math.cos(camYaw);
-    const spd = (dashing?9.4:6.1) * (player.sneak?0.55:1) * (player.carrying?0.55:1);
-    const nx=playerObj.position.x+fx*spd*dt, nz=playerObj.position.z+fz*spd*dt;
-    if(!blocked(nx,playerObj.position.z,0.42)) playerObj.position.x=nx;
-    if(!blocked(playerObj.position.x,nz,0.42)) playerObj.position.z=nz;
-    playerObj.rotation.y=Math.atan2(fx,fz);
+  if(mag>0.08){
+    const nx=mx/mag, nz=mz/mag;
+    const fx = -nx*Math.cos(camYaw) - nz*Math.sin(camYaw);
+    const fz = nx*Math.sin(camYaw) - nz*Math.cos(camYaw);
+    const spd = (dashing?9.4:6.1) * Math.min(1,mag) * (player.sneak?0.55:1) * (player.carrying?0.55:1);
+    const npx=playerObj.position.x+fx*spd*dt, npz=playerObj.position.z+fz*spd*dt;
+    if(!blocked(npx,playerObj.position.z,0.42)) playerObj.position.x=npx;
+    if(!blocked(playerObj.position.x,npz,0.42)) playerObj.position.z=npz;
+    /* 向き変更も瞬時スナップから滑らかな追従へ。[[放課後の居残り]]の
+       me.yaw=angLerp(me.yaw,atan2(dx,dz),min(1,dt*13))と同じ式 */
+    playerObj.rotation.y=angLerp(playerObj.rotation.y,Math.atan2(fx,fz),Math.min(1,dt*13));
     moving=true;
   }
   player.x=playerObj.position.x; player.z=playerObj.position.z;
@@ -1316,8 +1356,9 @@ function animate(){
       if(p.cooldown){ p.cooldown-=dt; if(p.cooldown<=0){ p.cooldown=0; if(p.marker) p.marker.visible=true; } }
     });
   }
-  camYaw-=lookVec.x*dt*2.2;
-  camPitch=clamp(camPitch+lookVec.y*dt*1.6,-0.3,0.85);
+  /* 視点回転(camYaw/camPitch)はマウス/タッチのpointermoveハンドラが直接
+     書き換える方式に統一したので、ここでの毎フレーム加算は不要(旧joyRの
+     継続回転ジョイスティック方式を廃止したため) */
   updateCamera();
   refreshActionMenu();
   updateMeters();
@@ -1361,8 +1402,9 @@ async function boot(useContinue){
   initPlayerObj();
   buildWeaponBar();
   bindCameraDrag(renderer.domElement);
-  bindJoystick('joyL','stickL',function(dx,dy){ moveVec.x=dx; moveVec.y=dy; },function(){ moveVec.x=0; moveVec.y=0; });
-  bindJoystick('joyR','stickR',function(dx,dy){ lookVec.x=dx; lookVec.y=dy; },function(){ lookVec.x=0; lookVec.y=0; });
+  /* 移動スティック/視点ドラッグの実体はモジュール読み込み時にwindowへ
+     バインド済み(#stick/#knobを使った放課後の居残り方式、上のbindCameraDrag
+     定義の直後を参照)。ここではダッシュ/しゃがみの押しっぱなしボタンだけ */
   bindHoldButton(document.getElementById('dashBtn'),function(v){ mobileDash=v; });
   bindHoldButton(document.getElementById('sneakBtn'),function(v){ mobileSneak=v; });
   clockObj=new THREE.Clock();
