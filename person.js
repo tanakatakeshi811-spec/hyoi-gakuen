@@ -476,6 +476,24 @@ function person(opt){
     puff.position.set(o[0],o[1],o[2]); blindMark.add(puff);
   });
   blindMark.position.y=H*0.92; blindMark.visible=false; g.add(blindMark);
+  /* 2026-09-17続報7: ビニール袋(黒)。気絶した相手をその場で包んで放置する
+     新アイテム用の見た目。既製モデルではなく簡易な自作ジオメトリ(黒い
+     楕円の袋+口を縛ったような輪っか)で表現する。bagged状態になったら
+     本体モデル(innerModel)を非表示にしてこちらを表示するので、
+     rig.rotation.z=Math.PI/2(既存の「倒れる」演出を流用)にした状態でも
+     不自然にならないよう、袋の長辺はローカルZ方向に伸ばしてある */
+  const bagMat=new THREE.MeshLambertMaterial({color:0x141414});
+  const bagMark=new THREE.Group();
+  const sack=new THREE.Mesh(new THREE.SphereGeometry(0.4,10,8),bagMat);
+  sack.scale.set(1,0.92,H*0.62/0.4);
+  sack.position.set(0,H*0.4,0);
+  bagMark.add(sack);
+  const tie=new THREE.Mesh(new THREE.TorusGeometry(0.13,0.045,6,10),new THREE.MeshLambertMaterial({color:0x2a2a2a}));
+  tie.rotation.x=Math.PI/2;
+  tie.position.set(0,H*0.4,H*0.32);
+  bagMark.add(tie);
+  bagMark.visible=false;
+  g.add(bagMark);
   /* 接地影 */
   const blob=new THREE.Mesh(new THREE.CircleGeometry(0.62,16),
     new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0.3,depthWrite:false}));
@@ -490,6 +508,7 @@ function person(opt){
 
   g.userData={mixer:mixer,actions:actions,currentAction:actions.idle||null,
     aura:aura,faintMark:faintMark,bindMark:bindMark,witnessMark:witnessMark,blindMark:blindMark,
+    bagMark:bagMark,innerModel:inner,
     heldSlot:heldSlot,faint:false,H:H};
   return g;
 }

@@ -423,6 +423,16 @@ function buildProps(){
     const marker=addMarker(x,z,0xff5a3c,'cyl');
     PROPS.push({type:'extinguisher',x:x,z:z,marker:marker,label:EXTINGUISHER.icon+' '+EXTINGUISHER.name+'を持つ'});
   });
+
+  /* 2026-09-17続報7: ビニール袋(黒)。専用の家庭科室/購買部という部屋が
+     このマップには無いため、既存の「購買のお菓子」と同じ購買部エリア
+     (昇降口)と、予備として廊下(用具置き場のイメージ)の2箇所に配置 */
+  const bagSpots=[roomCenter('entrance'),roomCenter('corridorE')];
+  bagSpots.forEach(function(c,i){
+    const x=c.x+(i===0?-6:8), z=c.z+(i===0?0:4);
+    const marker=addMarker(x,z,0x222222,'box');
+    PROPS.push({type:'trashbag',x:x,z:z,marker:marker,label:TRASHBAG.icon+' '+TRASHBAG.name+'を持つ'});
+  });
 }
 
 /* ---------------- 校舎の見た目強化(既製3Dモデル、当たり判定はいじらない) ----------------
@@ -604,7 +614,7 @@ function newPlayer(gender,name){
   return {
     name:name||'鴉羽 ツナグ', male:gender==='boy',
     x:100, z:106, yaw:Math.PI, sneak:false, carrying:false, captiveKey:null,
-    selectedWeapon:'book', weapons:{book:true}, extinguisher:0,
+    selectedWeapon:'book', weapons:{book:true}, extinguisher:0, trashbag:0,
     affection:0, possession:0, suspicion:0, trust:50,
     grades:{国語:40,数学:40,理科:40,社会:40,英語:40,体育:40},
     testScores:{},
@@ -652,7 +662,7 @@ function addNpc(key,def){
        過去のNPC全員が対象だった潜在バグで、今回の人数増加で誰の目にも
        明らかになった)。blinded:falseの明示初期化で解消 */
     blinded:false, blindT:0,
-    faint:false,faintT:0,captive:false,witness:0,scared:false,transferred:false});
+    faint:false,faintT:0,captive:false,bagged:false,witness:0,scared:false,transferred:false});
 }
 function buildNPCs(){
   npcs=[];
@@ -738,7 +748,20 @@ function followPath(npc,dt,speedMul){
 }
 function updateNPC(npc,dt,idx){
   if(npc.transferred||npc.captive){ npc.rig.visible=false; return; }
+  /* 2026-09-17続報7: ビニール袋(黒)で包まれた相手は行動停止・非表示の
+     「本体」の代わりに黒い袋の見た目(bagMark)だけを表示する。以後は
+     移動もAIも一切走らせない(旧倉庫拘束と同じく「隠された」状態) */
+  if(npc.bagged){
+    npc.rig.visible=true;
+    npc.rig.userData.innerModel.visible=false;
+    npc.rig.userData.bagMark.visible=true;
+    npc.rig.userData.faintMark.visible=false;
+    npc.rig.userData.witnessMark.visible=false;
+    npc.rig.userData.blindMark.visible=false;
+    return;
+  }
   npc.rig.visible=true;
+  if(npc.rig.userData.innerModel.visible!==true) npc.rig.userData.innerModel.visible=true;
   if(npc.blinded){
     npc.blindT-=dt;
     if(npc.blindT<=0){ npc.blinded=false; npc.rig.userData.blindMark.visible=false; }
@@ -819,7 +842,7 @@ function canSee(npc,x,z,rangeOverride){
 function witnessesAt(x,z,excludeKey){
   const mul=player.sneak?0.5:1;
   return npcs.filter(function(n){
-    if(n.key===excludeKey||n.faint||n.captive||n.transferred||n.blinded) return false;
+    if(n.key===excludeKey||n.faint||n.captive||n.transferred||n.blinded||n.bagged) return false;
     return canSee(n,x,z,n.visionRange*mul);
   });
 }
@@ -1105,6 +1128,32 @@ function actionRelease(npc){
   refreshActionMenu();
 }
 
+/* 2026-09-17続報7: ビニール袋(黒)。「運んで旧倉庫に拘束する」ルートとは
+   別の、その場で完結する隠蔽手段。気絶している相手に使うと、その場で
+   黒い袋に包んで放置でき、以後は旧倉庫のcheckShedExposure()のような
+   継続的な発覚リスクが一切かからなくなる(=しゅんりさんの意図通り
+   「そのまま放置しても大丈夫」)。ただし完全にノーリスクだと他の排除
+   手段との整合性が崩れるので、包んでいる瞬間だけは既存の目撃システムを
+   流用し、見られていれば相応の疑いの目は上がる */
+function actionBagWrap(npc){
+  if((player.trashbag||0)<=0){ toast('ビニール袋を持っていない。'); return; }
+  if(!npc.faint){ toast('気絶させてからでないと使えない。'); return; }
+  player.trashbag--;
+  npc.faint=false; npc.rig.userData.faint=false; npc.rig.userData.faintMark.visible=false;
+  npc.witness=0;
+  npc.bagged=true;
+  npc.rig.rotation.z=Math.PI/2; // 既存の「倒れる」演出をそのまま流用
+  toast(npc.name+'を黒いビニール袋に包んで、その場に置いていった……');
+  const seen=witnessesAt(npc.x,npc.z,npc.key);
+  if(seen.length){
+    seen.forEach(function(n){ n.witness=Math.max(n.witness,1); });
+    gainSuspicion(20*seen.length,'袋に包んでいるところを見られてしまった……!!');
+  } else {
+    gainSuspicion(2);
+  }
+  refreshActionMenu();
+}
+
 /* ---------------- 旧倉庫の発覚リスク(拘束中の相手がいる間、誰かが倉庫に
    近づき続けると「発覚」BADエンドに繋がる) ---------------- */
 let shedDangerT=0, shedWarned=false;
@@ -1112,7 +1161,7 @@ function checkShedExposure(dt){
   const activeCaptives=Object.keys(captives).filter(function(k){ return captives[k]; });
   if(!activeCaptives.length){ shedDangerT=0; shedWarned=false; return; }
   const near=npcs.some(function(n){
-    if(n.captive||n.faint||n.transferred) return false;
+    if(n.captive||n.faint||n.transferred||n.bagged) return false;
     return dist2(n.x,n.z,SHED.x,SHED.z)<9*9;
   });
   if(near){
@@ -1173,6 +1222,13 @@ function actionRoofKey(){
 function actionPickupExtinguisher(propRef){
   player.extinguisher=(player.extinguisher||0)+1;
   toast('『'+EXTINGUISHER.name+'』を手に入れた(所持数 '+player.extinguisher+')');
+  if(propRef){ propRef.marker.visible=false; propRef.cooldown=90; }
+}
+/* 2026-09-17続報7: ビニール袋(黒)の拾得。専用の部屋が無いため、既存の
+   「購買のお菓子」と同じ購買部エリア(昇降口)と、予備で廊下に配置 */
+function actionPickupTrashbag(propRef){
+  player.trashbag=(player.trashbag||0)+1;
+  toast('『'+TRASHBAG.name+'』を手に入れた(所持数 '+player.trashbag+')');
   if(propRef){ propRef.marker.visible=false; propRef.cooldown=90; }
 }
 
@@ -1356,7 +1412,7 @@ let lastTargetSig=null;
 function findNearestInteractable(){
   let best=null,bd=3.4;
   npcs.forEach(function(n){
-    if(n.captive||n.transferred) return;
+    if(n.captive||n.transferred||n.bagged) return;
     if(player.carrying&&player.captiveKey===n.key) return;
     const d=Math.hypot(playerObj.position.x-n.x,playerObj.position.z-n.z);
     if(d<bd){ bd=d; best={type:'npc',npc:n}; }
@@ -1395,6 +1451,8 @@ function buildActionsFor(target){
     const acts=[{label:'話す',onClick:function(){ actionTalk(npc); }}];
     if(npc.faint && !player.carrying){
       acts.push({label:'運ぶ',sub:'旧倉庫まで連れて行く',onClick:function(){ actionCarry(npc); }});
+      acts.push({label:TRASHBAG.icon+' 袋に包んで放置する',sub:'所持:'+(player.trashbag||0)+'枚／その場で処理完了・発覚リスクなし',
+        disabled:(player.trashbag||0)<=0,onClick:function(){ actionBagWrap(npc); }});
       return acts;
     }
     if(npc.blinded){
@@ -1432,6 +1490,7 @@ function buildActionsFor(target){
   if(p.type==='weapon') return [{label:p.label,onClick:function(){ actionPickupWeapon(p.key); p.picked=true; if(p.marker) p.marker.visible=false; }}];
   if(p.type==='gift') return [{label:p.label,onClick:function(){ actionPickupGift(p.key,p); }}];
   if(p.type==='extinguisher') return [{label:p.label,onClick:function(){ actionPickupExtinguisher(p); }}];
+  if(p.type==='trashbag') return [{label:p.label,onClick:function(){ actionPickupTrashbag(p); }}];
   if(p.type==='board') return [{label:'噂を流す(ひなの)',disabled:hinanoState.transferred,onClick:function(){ actionRumor('hinano'); }}];
   if(p.type==='desk') return SUBJECTS.map(function(s){
     return {label:'勉強:'+s,sub:'理解度 '+Math.round(player.grades[s]),onClick:function(){ actionStudy(s); }};
