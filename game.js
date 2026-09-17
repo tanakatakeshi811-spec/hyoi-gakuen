@@ -433,6 +433,12 @@ function buildProps(){
     const marker=addMarker(x,z,0x222222,'box');
     PROPS.push({type:'trashbag',x:x,z:z,marker:marker,label:TRASHBAG.icon+' '+TRASHBAG.name+'を持つ'});
   });
+
+  /* 2026-09-17続報7: 惚れ薬のクラフト台。「理科室で何個でも作れる」との
+     指定通り、専用のクールダウンなしアクションとして理科室に設置 */
+  const sci=roomCenter('science');
+  addMarker(sci.x-3,sci.z+6,0xff6fb0,'ico');
+  PROPS.push({type:'potioncraft',x:sci.x-3,z:sci.z+6,label:LOVE_POTION.icon+' 惚れ薬を作る(理科室)'});
 }
 
 /* ---------------- 校舎の見た目強化(既製3Dモデル、当たり判定はいじらない) ----------------
@@ -614,7 +620,7 @@ function newPlayer(gender,name){
   return {
     name:name||'鴉羽 ツナグ', male:gender==='boy',
     x:100, z:106, yaw:Math.PI, sneak:false, carrying:false, captiveKey:null,
-    selectedWeapon:'book', weapons:{book:true}, extinguisher:0, trashbag:0,
+    selectedWeapon:'book', weapons:{book:true}, extinguisher:0, trashbag:0, potion:0,
     affection:0, possession:0, suspicion:0, trust:50,
     grades:{国語:40,数学:40,理科:40,社会:40,英語:40,体育:40},
     testScores:{},
@@ -1231,6 +1237,36 @@ function actionPickupTrashbag(propRef){
   toast('『'+TRASHBAG.name+'』を手に入れた(所持数 '+player.trashbag+')');
   if(propRef){ propRef.marker.visible=false; propRef.cooldown=90; }
 }
+/* 2026-09-17続報7: 惚れ薬。「理科室で何個でも作れる」というしゅんりさんの
+   指定通り、消費素材も回数制限も設けない(既存のクールダウン制ピックアップ
+   とは違う独立系統のアクション) */
+function actionCraftPotion(){
+  player.potion=(player.potion||0)+1;
+  toast('理科室の薬品棚から、怪しい『惚れ薬』を作った(所持数 '+player.potion+')');
+  refreshActionMenu();
+}
+/* 惚れ薬を使う。このゲームの好感度(player.affection)は陽向専用のパラメータ
+   なので、対象は陽向のみ(既存の贈り物/一緒に過ごす等と同じ枠)。使うと
+   好感度は既存手段の3〜5倍(hangout+14の約3.5倍)に当たる+50が入る一方、
+   さすがに不自然な行為なので見られていれば疑いの目が上がる・信頼度も
+   わずかに下がるリスクを持たせた */
+function actionUsePotion(npc){
+  if((player.potion||0)<=0){ toast('惚れ薬を持っていない。'); return; }
+  player.potion--;
+  const v=LOVE_POTION.value;
+  player.affection=clamp(player.affection+v,0,100);
+  trustDelta(-1);
+  toast(npc.name+'にこっそり『惚れ薬』を飲ませた……(好感度+'+v+')');
+  const seen=witnessesAt(npc.x,npc.z,npc.key);
+  if(seen.length){
+    seen.forEach(function(n){ n.witness=Math.max(n.witness,1); });
+    gainSuspicion(12*seen.length,'怪しい薬を渡しているところを見られてしまったかもしれない……');
+  } else {
+    gainSuspicion(1);
+  }
+  updateMeters();
+  refreshActionMenu();
+}
 
 /* ---------------- 時間の進行 ---------------- */
 const TIME_SCALE=2.4; // 1リアル秒 = ゲーム内何分
@@ -1465,6 +1501,8 @@ function buildActionsFor(target){
       acts.push({label:'贈り物を渡す',sub:giftSubLabel(),disabled:totalGifts()===0,
         onClick:function(){ openGiftChoice(npc); }});
       if(per.type==='lunch'||per.type==='after') acts.push({label:'一緒に過ごす',onClick:function(){ actionHangout(npc); }});
+      acts.push({label:LOVE_POTION.icon+' 惚れ薬を使う',sub:'所持:'+(player.potion||0)+'個／好感度が大きく上がる',
+        disabled:(player.potion||0)<=0,onClick:function(){ actionUsePotion(npc); }});
       if(per.type==='after'&&player.affection>=60) acts.push({label:'告白する',onClick:function(){ actionConfess(npc); }});
     }
     const eliminable=(npc.role==='student'||npc.role==='rival')&&npc.key!=='hinata';
@@ -1491,6 +1529,7 @@ function buildActionsFor(target){
   if(p.type==='gift') return [{label:p.label,onClick:function(){ actionPickupGift(p.key,p); }}];
   if(p.type==='extinguisher') return [{label:p.label,onClick:function(){ actionPickupExtinguisher(p); }}];
   if(p.type==='trashbag') return [{label:p.label,onClick:function(){ actionPickupTrashbag(p); }}];
+  if(p.type==='potioncraft') return [{label:LOVE_POTION.icon+' 惚れ薬を作る',sub:'所持:'+(player.potion||0)+'個／何個でも作れる',onClick:actionCraftPotion}];
   if(p.type==='board') return [{label:'噂を流す(ひなの)',disabled:hinanoState.transferred,onClick:function(){ actionRumor('hinano'); }}];
   if(p.type==='desk') return SUBJECTS.map(function(s){
     return {label:'勉強:'+s,sub:'理解度 '+Math.round(player.grades[s]),onClick:function(){ actionStudy(s); }};
