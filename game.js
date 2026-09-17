@@ -41,6 +41,14 @@ function mergeGeos(list){
 const OBSTACLES=[]; // 屋外/屋上の当たり判定(円)
 const PROPS=[];     // インタラクト可能な小物
 let sceneObstacleMeshes=[];
+/* 2026-09-17緊急修正: 三人称カメラの壁/屋根めり込み対策。壁・屋根・庇・
+   看板など「見た目上ぶつかってほしい」構造物のメッシュはすべてこの配列に
+   登録しておき、updateCamera()が毎フレームここへレイキャストしてカメラを
+   手前に引き寄せる。新しく校舎の構造物メッシュを追加するときは、必ず
+   scene.add(...)と同じタイミングでcamColliders.push(...)も呼ぶこと
+   (これを忘れるとまた「カメラが屋根に吸われる」事故が起きるので注意) */
+const camColliders=[];
+const camRaycaster=new THREE.Raycaster();
 
 function buildIndoor(){
   const wallGeos=[], floorGeos=[];
@@ -55,6 +63,7 @@ function buildIndoor(){
   const wallMesh=new THREE.Mesh(mergeGeos(wallGeos), PM(0xdcd3c0,10,0x222222));
   wallMesh.castShadow=true; wallMesh.receiveShadow=true;
   scene.add(wallMesh);
+  camColliders.push(wallMesh);
   const floorMesh=new THREE.Mesh(mergeGeos(floorGeos), LM(0xb8ad94));
   floorMesh.receiveShadow=true;
   scene.add(floorMesh);
@@ -80,12 +89,14 @@ function buildSchoolExterior(){
   roof.position.set(cx,wallTop+0.2,cz);
   roof.castShadow=true; roof.receiveShadow=true;
   scene.add(roof);
+  camColliders.push(roof); // カメラ衝突判定にも屋根を含める(緊急修正、下のupdateCamera()参照)
   /* 屋根のふち(見切り縁)。屋上の柵と同じく「ただの平面」に見えないよう
      少し立ち上げた帯を四辺に回す */
   const fasciaMat=LM(0x3d443e);
   function fasciaLine(fcx,fcz,w,d){
     const m=new THREE.Mesh(new THREE.BoxGeometry(w,0.6,d),fasciaMat);
     m.position.set(fcx,wallTop+0.65,fcz); scene.add(m);
+    camColliders.push(m);
   }
   fasciaLine(cx,z0-1.2, x1-x0+3, 0.35);
   fasciaLine(cx,z1+1.2, x1-x0+3, 0.35);
@@ -112,15 +123,19 @@ function buildSchoolExterior(){
     const m4=new THREE.Mesh(glassGeoNS,glassMat); m4.position.set(x1+0.09,winY,z); scene.add(m4); // 東面
   }
 
-  /* 昇降口(南面の開口部)にキャノピーと柱を追加。当たり判定は付けない
-     (既存のプレイヤー移動が素通りできる開口部を維持する) */
+  /* 昇降口(南面の開口部)にキャノピーと柱を追加。プレイヤーの移動用当たり判定
+     (OBSTACLES)は付けない(既存のプレイヤー移動が素通りできる開口部を維持する)。
+     ただしカメラが裏側にめり込む事故を防ぐため、camCollidersには登録する
+     (プレイヤーの通行とカメラの視界ブロックは別物として扱う) */
   const gapCx=(gapX0+gapX1)/2;
   const canopy=new THREE.Mesh(new THREE.BoxGeometry(gapX1-gapX0+2,0.3,4),LM(0x6b5a3a));
   canopy.position.set(gapCx,2.7,z1+2); canopy.castShadow=true; scene.add(canopy);
+  camColliders.push(canopy);
   const pillarMat=LM(0xcfc7ae);
   [gapX0+0.6,gapX1-0.6].forEach(function(px){
     const p=new THREE.Mesh(new THREE.BoxGeometry(0.35,2.7,0.35),pillarMat);
     p.position.set(px,1.35,z1+3.7); p.castShadow=true; scene.add(p);
+    camColliders.push(p);
   });
   const doorLabel=makeLabelSprite('昇降口',8);
   doorLabel.position.set(gapCx,3.6,z1+3.9); scene.add(doorLabel);
@@ -145,6 +160,7 @@ function addObstacleBox(cx,cz,w,d,rotY,color){
   m.position.set(cx,1.3,cz); if(rotY) m.rotation.y=rotY;
   m.castShadow=true; m.receiveShadow=true;
   scene.add(m);
+  camColliders.push(m);
   OBSTACLES.push({x:cx,z:cz,r:Math.max(w,d)/2+0.3});
 }
 function addTree(x,z){
@@ -201,6 +217,7 @@ function buildOutdoor(){
   stone.position.set(shr.x,0.6,shr.z); stone.castShadow=true; scene.add(stone);
   const roof=new THREE.Mesh(new THREE.ConeGeometry(1.4,0.8,4),LM(0x6b4a2c));
   roof.position.set(shr.x,1.5,shr.z); roof.rotation.y=Math.PI/4; scene.add(roof);
+  camColliders.push(roof);
   OBSTACLES.push({x:shr.x,z:shr.z,r:0.9});
   /* グラウンド(旗・ゴール風の飾り) */
   [[60,235],[200,235]].forEach(function(p){
@@ -221,12 +238,14 @@ function buildShed(){
   wall(cx-w/2*0.4, cz+d/2, w*0.55, t);// 南壁(東寄りだけ、西側はドア開口)
   const roof=new THREE.Mesh(new THREE.BoxGeometry(w+1,0.3,d+1),LM(0x24201a));
   roof.position.set(cx,h+0.15,cz); scene.add(roof);
+  camColliders.push(roof);
   const label=makeLabelSprite('旧倉庫'); label.position.set(cx,h+1.6,cz); scene.add(label);
   OBSTACLES.push({x:cx,z:cz-d/2,r:1}); // 大まかな当たり判定は壁ごとに追加済み
 }
 function addObstacleBoxRaw(cx,cz,w,h,d,mat){
   const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),mat);
   m.position.set(cx,h/2,cz); m.castShadow=true; m.receiveShadow=true; scene.add(m);
+  camColliders.push(m);
   OBSTACLES.push({x:cx,z:cz,r:Math.max(w,d)/2});
 }
 
@@ -241,6 +260,7 @@ function buildRoof(){
     m.position.set((x0+x1)/2,0.55,(z0+z1)/2);
     m.rotation.y=Math.atan2(x1-x0,z1-z0)+Math.PI/2;
     scene.add(m);
+    camColliders.push(m);
   }
   rail(ROOF_OFFSET.x,ROOF_OFFSET.z,ROOF_OFFSET.x+w,ROOF_OFFSET.z);
   rail(ROOF_OFFSET.x,ROOF_OFFSET.z,ROOF_OFFSET.x,ROOF_OFFSET.z+d);
@@ -1532,6 +1552,35 @@ function updatePlayer(dt){
     }
   }
 }
+/* 2026-09-17緊急修正: 「屋根のせいでカメラが見えない」バグ対応。
+   原因はカメラ自体が屋根メッシュの内部にめり込んでいたのではなく、カメラの
+   Y座標(4.0〜7.15、camPitchで変動)が校舎の屋根(天井、Y=3.4〜3.8)より常に
+   高い位置に固定されていたこと。三人称カメラは「プレイヤーの背後・上方」に
+   浮かぶ設計のため、屋根を追加する前は何にも遮られなかったが、全室共通の
+   屋根(天井)を新設したことで、カメラ→プレイヤーの視線が必ず屋根の
+   すぐ下をかすめるように交差するようになり、屋根の広い一枚板がカメラの
+   目の前いっぱいに映ってしまっていた(=画面が単色で埋まる症状の正体)。
+   壁の内側に極端に近づいた場合も同様の理屈で起こりうる。
+   対策: 理想のカメラ位置とプレイヤー(の注視点)の間でレイキャストし、
+   camColliders(壁・屋根・庇・看板・柵など)に当たったら、その手前で
+   カメラを止める(壁抜け/天井抜け防止の定番処理)。新しく校舎の構造物を
+   追加する時は、必ずcamColliders.push(...)も忘れずに行うこと */
+function resolveCameraCollision(from,idealPos){
+  const dir=new THREE.Vector3().subVectors(idealPos,from);
+  const fullDist=dir.length();
+  if(fullDist<0.0001) return idealPos.clone();
+  dir.normalize();
+  camRaycaster.set(from,dir);
+  camRaycaster.near=0; camRaycaster.far=fullDist;
+  const hits=camRaycaster.intersectObjects(camColliders,false);
+  if(hits.length){
+    const margin=0.4; // 面にめり込まないための余白
+    const minDist=1.3; // プレイヤーの目の前すぎてキャラが見えなくなるのを防ぐ下限
+    const safeDist=clamp(hits[0].distance-margin,minDist,fullDist);
+    return from.clone().addScaledVector(dir,safeDist);
+  }
+  return idealPos.clone();
+}
 function updateCamera(){
   // 縦長スマホ(aspect<1)はfovを少し広げるだけだと近くの床とキャラで画面が
   // 埋まりすぎるので、狭いほどカメラを少し後ろに引いて視界の圧迫感を抑える
@@ -1540,8 +1589,12 @@ function updateCamera(){
   const dist=7.6*distMul;
   const fwd={x:Math.sin(camYaw),z:Math.cos(camYaw)};
   const tx=playerObj.position.x, tz=playerObj.position.z;
-  camera.position.set(tx-fwd.x*dist, 1.6+3.3+Math.sin(camPitch)*3.0, tz-fwd.z*dist);
-  camera.lookAt(tx, 1.5+Math.sin(camPitch)*1.0, tz);
+  const lookY=1.5+Math.sin(camPitch)*1.0;
+  const idealPos=new THREE.Vector3(tx-fwd.x*dist, 1.6+3.3+Math.sin(camPitch)*3.0, tz-fwd.z*dist);
+  const lookTarget=new THREE.Vector3(tx,lookY,tz);
+  const finalPos=resolveCameraCollision(lookTarget,idealPos);
+  camera.position.copy(finalPos);
+  camera.lookAt(tx, lookY, tz);
 }
 
 /* ---------------- メインループ ---------------- */
