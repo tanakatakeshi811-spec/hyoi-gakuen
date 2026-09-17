@@ -67,6 +67,65 @@ function buildIndoor(){
   });
 }
 
+/* 2026-09-17続報3: 校舎の外観強化。壁(buildIndoor)はグリッド全域(56x29マス)を
+   1個の巨大な直方体として塗りつぶしているため、外から見ると「ただの箱」に
+   見えてしまっていた(俯瞰で確認済み: 屋根が無く上から部屋の中が丸見え、
+   外壁に窓も無い)。当たり判定(blocked())はグリッド/OBSTACLESしか見ていない
+   ので、この関数は完全に見た目だけの飾り付けとして追加できる。
+   校舎全体を覆う1枚の屋根は同時に「全室共通の天井」としても機能する */
+function buildSchoolExterior(){
+  const x0=0,x1=COLS*TILE, z0=0,z1=ROWS*TILE, wallTop=3.4;
+  const cx=(x0+x1)/2, cz=(z0+z1)/2;
+  const roof=new THREE.Mesh(new THREE.BoxGeometry(x1-x0+3,0.4,z1-z0+3), PM(0x565f57,8,0x1a1a1a));
+  roof.position.set(cx,wallTop+0.2,cz);
+  roof.castShadow=true; roof.receiveShadow=true;
+  scene.add(roof);
+  /* 屋根のふち(見切り縁)。屋上の柵と同じく「ただの平面」に見えないよう
+     少し立ち上げた帯を四辺に回す */
+  const fasciaMat=LM(0x3d443e);
+  function fasciaLine(fcx,fcz,w,d){
+    const m=new THREE.Mesh(new THREE.BoxGeometry(w,0.6,d),fasciaMat);
+    m.position.set(fcx,wallTop+0.65,fcz); scene.add(m);
+  }
+  fasciaLine(cx,z0-1.2, x1-x0+3, 0.35);
+  fasciaLine(cx,z1+1.2, x1-x0+3, 0.35);
+  fasciaLine(x0-1.2,cz, 0.35, z1-z0+3);
+  fasciaLine(x1+1.2,cz, 0.35, z1-z0+3);
+
+  /* 窓: 外周4面に等間隔でガラス色の板を並べる。南面は昇降口の開口部
+     (そもそも壁が無い区間、後述のcanopyで飾る)を避ける */
+  const glassMat=new THREE.MeshPhongMaterial({color:0x9fd8ec,shininess:70,specular:0x556666,
+    transparent:true,opacity:0.78});
+  const glassGeo=new THREE.BoxGeometry(1.7,1.15,0.18);
+  const glassGeoNS=new THREE.BoxGeometry(0.18,1.15,1.7);
+  const entRoom=ROOMS.find(function(r){ return r.key==='entrance'; });
+  const gapX0=entRoom.c0*TILE, gapX1=(entRoom.c1+1)*TILE;
+  const winY=1.9, step=8;
+  for(let x=step;x<x1-2;x+=step){
+    const m1=new THREE.Mesh(glassGeo,glassMat); m1.position.set(x,winY,z0-0.09); scene.add(m1); // 北面
+    if(x<gapX0-1||x>gapX1+1){
+      const m2=new THREE.Mesh(glassGeo,glassMat); m2.position.set(x,winY,z1+0.09); scene.add(m2); // 南面(昇降口の開口部は避ける)
+    }
+  }
+  for(let z=step;z<z1-2;z+=step){
+    const m3=new THREE.Mesh(glassGeoNS,glassMat); m3.position.set(x0-0.09,winY,z); scene.add(m3); // 西面
+    const m4=new THREE.Mesh(glassGeoNS,glassMat); m4.position.set(x1+0.09,winY,z); scene.add(m4); // 東面
+  }
+
+  /* 昇降口(南面の開口部)にキャノピーと柱を追加。当たり判定は付けない
+     (既存のプレイヤー移動が素通りできる開口部を維持する) */
+  const gapCx=(gapX0+gapX1)/2;
+  const canopy=new THREE.Mesh(new THREE.BoxGeometry(gapX1-gapX0+2,0.3,4),LM(0x6b5a3a));
+  canopy.position.set(gapCx,2.7,z1+2); canopy.castShadow=true; scene.add(canopy);
+  const pillarMat=LM(0xcfc7ae);
+  [gapX0+0.6,gapX1-0.6].forEach(function(px){
+    const p=new THREE.Mesh(new THREE.BoxGeometry(0.35,2.7,0.35),pillarMat);
+    p.position.set(px,1.35,z1+3.7); p.castShadow=true; scene.add(p);
+  });
+  const doorLabel=makeLabelSprite('昇降口',8);
+  doorLabel.position.set(gapCx,3.6,z1+3.9); scene.add(doorLabel);
+}
+
 function makeLabelSprite(text,size){
   const cv=document.createElement('canvas'); cv.width=280; cv.height=64;
   const ctx=cv.getContext('2d');
@@ -243,6 +302,7 @@ function initScene(){
 
   initGrid();
   buildIndoor();
+  buildSchoolExterior();
   buildOutdoor();
   buildRoof();
   buildProps();
@@ -392,6 +452,119 @@ function buildSchoolDecor(){
   decorateClassroom('classB',3,3);
   decorateClassroom('class2a',3,3);
   decorateLibrary();
+  decorateNurse();
+  decorateScience();
+  decorateMusic();
+  decorateGym();
+  decorateArt();
+  decorateCouncil();
+  decorateCorridor('corridorN',true);
+  decorateCorridor('corridorE',false);
+  decorateEntrance();
+}
+/* 保健室: ベッド2台+簡易カーテン(モデルが見当たらなかったので原始形状で代用) */
+function decorateNurse(){
+  const b=roomWorldBounds('nurse'); if(!b) return;
+  [b.z0+3.4,b.z0+8.2].forEach(function(bz,i){
+    const bed=makeBedModel(); if(!bed) return;
+    bed.position.set(b.x0+2.2,0,bz); bed.rotation.y=Math.PI/2; scene.add(bed);
+    // カーテン(布+ポール、CC0/CC-BYで良い出典が見つからなかったため原始形状)
+    const curtainMat=new THREE.MeshLambertMaterial({color:0xcfe0d8,transparent:true,opacity:0.88});
+    const curtain=new THREE.Mesh(new THREE.PlaneGeometry(3.6,2.0),curtainMat);
+    curtain.position.set(b.x0+4.0,1.05,bz); curtain.rotation.y=Math.PI/2; scene.add(curtain);
+    const pole=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,2.1,6),LM(0xb0b0b0));
+    pole.position.set(b.x0+4.0,1.05,bz-1.8); scene.add(pole);
+    const pole2=new THREE.Mesh(new THREE.CylinderGeometry(0.04,0.04,2.1,6),LM(0xb0b0b0));
+    pole2.position.set(b.x0+4.0,1.05,bz+1.8); scene.add(pole2);
+  });
+}
+/* 理科室: 机を実験台に見立てて並べ、一部の上に顕微鏡を置く */
+function decorateScience(){
+  const b=roomWorldBounds('science'); if(!b) return;
+  const cols=2,rows=3, marginX=4.5, startZ=b.z0+7, endZ=b.z1-4;
+  const colGap=(b.x1-b.x0)-marginX*2, rowGap=(endZ-startZ)/(rows-1);
+  for(let r=0;r<rows;r++){
+    for(let c=0;c<cols;c++){
+      const desk=makeDeskModel(); if(!desk) continue;
+      const x=b.x0+marginX+colGap*c, z=startZ+rowGap*r;
+      desk.position.set(x,0,z); desk.rotation.y=c===0?Math.PI/2:-Math.PI/2;
+      scene.add(desk);
+      if((r+c)%2===0){
+        const micro=makeMicroscopeModel();
+        if(micro){ micro.position.set(x,0.72,z); scene.add(micro); }
+      }
+    }
+  }
+}
+/* 音楽室: ピアノを1台、壁際に配置 */
+function decorateMusic(){
+  const b=roomWorldBounds('music'); if(!b) return;
+  const piano=makePianoModel(); if(!piano) return;
+  piano.position.set((b.x0+b.x1)/2,0,b.z0+1.6); piano.rotation.y=Math.PI; scene.add(piano);
+}
+/* 体育館: 床にマットを敷き並べ、隅に用具ロッカーを配置 */
+function decorateGym(){
+  const b=roomWorldBounds('gym'); if(!b) return;
+  for(let i=0;i<4;i++){
+    const mat=makeGymmatModel(); if(!mat) continue;
+    mat.position.set(b.x0+6+i*2.2,0,b.z0+4); scene.add(mat);
+  }
+  for(let i=0;i<3;i++){
+    const lk=makeLockerModel(); if(!lk) continue;
+    lk.position.set(b.x1-1.3,0,b.z1-3-i*2.1); lk.rotation.y=-Math.PI/2; scene.add(lk);
+  }
+}
+/* 美術部室: イーゼルを3台、向きを散らして配置 */
+function decorateArt(){
+  const b=roomWorldBounds('art'); if(!b) return;
+  const spots=[[b.x0+2.2,b.z0+2.6,0.3],[b.x0+5.5,b.z0+3.4,-0.4],[b.x0+3.6,b.z1-2.2,2.6]];
+  spots.forEach(function(s){
+    const easel=makeEaselModel(); if(!easel) return;
+    easel.position.set(s[0],0,s[1]); easel.rotation.y=s[2]; scene.add(easel);
+  });
+}
+/* 生徒会室: 丸テーブル+簡易な椅子(モデルが見当たらなかったので原始形状) */
+function decorateCouncil(){
+  const b=roomWorldBounds('council'); if(!b) return;
+  // 那由多(生徒会長)の待機位置=roomCenter('council')とぴったり重なると
+  // 「テーブルの上に立っているように見える」ため、少しずらして配置する
+  const cx=(b.x0+b.x1)/2+2.2, cz=(b.z0+b.z1)/2+1.6;
+  const table=makeRoundTableModel(); if(table){ table.position.set(cx,0,cz); scene.add(table); }
+  const chairMat=LM(0x5a4a8a);
+  [[1,0],[-1,0],[0,1],[0,-1]].forEach(function(d){
+    const chair=new THREE.Group();
+    const seat=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.08,0.5),chairMat); seat.position.y=0.45; chair.add(seat);
+    const back=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.5,0.08),chairMat);
+    back.position.set(0,0.7,-0.24*Math.sign(d[1]||d[0]||1)); chair.add(back);
+    chair.traverse(function(o){ if(o.isMesh) o.castShadow=true; });
+    chair.position.set(cx+d[0]*1.4,0,cz+d[1]*1.4);
+    scene.add(chair);
+  });
+}
+/* 廊下: ロッカーを壁沿いに等間隔で並べる */
+function decorateCorridor(roomKey,vertical){
+  const b=roomWorldBounds(roomKey); if(!b) return;
+  const count=vertical?6:8;
+  for(let i=0;i<count;i++){
+    const lk=makeLockerModel(); if(!lk) continue;
+    if(vertical){
+      lk.position.set(b.x0+1.3,0,b.z0+3+i*(( b.z1-b.z0-6)/(count-1)));
+      lk.rotation.y=Math.PI/2;
+    } else {
+      lk.position.set(b.x0+4+i*((b.x1-b.x0-8)/(count-1)),0,b.z0+1.3);
+    }
+    scene.add(lk);
+  }
+}
+/* 昇降口: 靴箱代わりにロッカーを2列並べる */
+function decorateEntrance(){
+  const b=roomWorldBounds('entrance'); if(!b) return;
+  for(let i=0;i<5;i++){
+    const lk1=makeLockerModel();
+    if(lk1){ lk1.position.set(b.x0+1.3,0,b.z0+2+i*1.7); lk1.rotation.y=Math.PI/2; scene.add(lk1); }
+    const lk2=makeLockerModel();
+    if(lk2){ lk2.position.set(b.x1-1.3,0,b.z0+2+i*1.7); lk2.rotation.y=-Math.PI/2; scene.add(lk2); }
+  }
 }
 
 /* ---------------- プレイヤー ---------------- */

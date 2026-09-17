@@ -32,6 +32,25 @@ function loadGLTF(url){
   });
 }
 let TREE_TEMPLATE=null, DESK_TEMPLATE=null, BLACKBOARD_TEMPLATE=null, BOOKCASE_TEMPLATE=null;
+let LOCKER_TEMPLATE=null, BED_TEMPLATE=null, PIANO_TEMPLATE=null, MICROSCOPE_TEMPLATE=null,
+  GYMMAT_TEMPLATE=null, EASEL_TEMPLATE=null, RNDTABLE_TEMPLATE=null;
+/* モデルの原点位置や単位系がバラバラ(desk.glbと同じく高さ方向の中央が原点の
+   ものや、piano/easelのように昔のGoogle Poly由来で座標が現実の数万倍
+   スケールで焼き込まれているものが混在する)なので、Box3の実測値から
+   「目標の高さになるよう一様スケール→中心を原点(x,z)・接地面をy=0に
+   揃える」という汎用の正規化を通してから使う(個別モデルごとの補正値を
+   ハードコードしなくて済む) */
+function normalizeToFloor(root,targetH){
+  const box=new THREE.Box3().setFromObject(root);
+  const size=new THREE.Vector3(); box.getSize(size);
+  const center=new THREE.Vector3(); box.getCenter(center);
+  const scale=size.y>0?targetH/size.y:1;
+  root.scale.setScalar(scale);
+  root.position.set(-center.x*scale, -box.min.y*scale, -center.z*scale);
+  const wrap=new THREE.Group();
+  wrap.add(root);
+  return wrap;
+}
 function calmMaterials(root){
   // このシーンの2灯ライティング(ヘミスフィア+ディレクショナル、IBLなし)だと
   // metalness高めのPBRマテリアルは暗く沈むため、他のオブジェクトと馴染むように
@@ -52,20 +71,39 @@ function preloadCharacterModels(){
     loadGLTF('assets/models/desk.glb'),
     loadGLTF('assets/models/blackboard.glb'),
     loadGLTF('assets/models/bookcase.glb'),
+    loadGLTF('assets/models/locker.glb'),
+    loadGLTF('assets/models/bed.glb'),
+    loadGLTF('assets/models/piano.glb'),
+    loadGLTF('assets/models/microscope.glb'),
+    loadGLTF('assets/models/gymmat.glb'),
+    loadGLTF('assets/models/easel.glb'),
+    loadGLTF('assets/models/rndtable.glb'),
   ]).then(function(results){
     const manGltf=results[0], womanGltf=results[1], treeGltf=results[2],
-      deskGltf=results[3], blackboardGltf=results[4], bookcaseGltf=results[5];
+      deskGltf=results[3], blackboardGltf=results[4], bookcaseGltf=results[5],
+      lockerGltf=results[6], bedGltf=results[7], pianoGltf=results[8],
+      microscopeGltf=results[9], gymmatGltf=results[10], easelGltf=results[11],
+      rndtableGltf=results[12];
     CHAR_TEMPLATES = {
       male:  {scene:manGltf.scene,   animations:manGltf.animations,
         scale:TARGET_HEIGHT.male/RAW_HEIGHT.male},
       female:{scene:womanGltf.scene, animations:womanGltf.animations,
         scale:TARGET_HEIGHT.female/RAW_HEIGHT.female},
     };
-    [treeGltf.scene,deskGltf.scene,blackboardGltf.scene,bookcaseGltf.scene].forEach(calmMaterials);
+    [treeGltf.scene,deskGltf.scene,blackboardGltf.scene,bookcaseGltf.scene,
+      lockerGltf.scene,bedGltf.scene,pianoGltf.scene,microscopeGltf.scene,
+      gymmatGltf.scene,easelGltf.scene,rndtableGltf.scene].forEach(calmMaterials);
     TREE_TEMPLATE=treeGltf.scene;
     DESK_TEMPLATE=deskGltf.scene;
     BLACKBOARD_TEMPLATE=blackboardGltf.scene;
     BOOKCASE_TEMPLATE=bookcaseGltf.scene;
+    LOCKER_TEMPLATE=lockerGltf.scene;
+    BED_TEMPLATE=bedGltf.scene;
+    PIANO_TEMPLATE=pianoGltf.scene;
+    MICROSCOPE_TEMPLATE=microscopeGltf.scene;
+    GYMMAT_TEMPLATE=gymmatGltf.scene;
+    EASEL_TEMPLATE=easelGltf.scene;
+    RNDTABLE_TEMPLATE=rndtableGltf.scene;
     return CHAR_TEMPLATES;
   });
   return CHAR_MODELS_PROMISE;
@@ -105,6 +143,53 @@ function makeBookcaseModel(){
   const b=BOOKCASE_TEMPLATE.clone(true);
   b.scale.setScalar(0.85);
   return b;
+}
+/* 2026-09-17続報3: 校舎の見た目強化(廊下・昇降口・保健室・理科室・音楽室・
+   体育館・美術部室・生徒会室に既製3Dモデルの備品を追加)。当たり判定は
+   これまで通り一切追加しない見た目だけの飾り */
+
+/* ロッカー(廊下の備品/昇降口の靴箱を兼用、CC-BY) */
+function makeLockerModel(){
+  if(!LOCKER_TEMPLATE) return null;
+  const inner=LOCKER_TEMPLATE.clone(true);
+  return normalizeToFloor(inner,2.0);
+}
+/* 保健室のベッド(CC0) */
+function makeBedModel(){
+  if(!BED_TEMPLATE) return null;
+  const inner=BED_TEMPLATE.clone(true);
+  return normalizeToFloor(inner,0.85);
+}
+/* 音楽室のピアノ(CC-BY、旧Google Poly由来で座標スケールが極端に大きい
+   ためnormalizeToFloor()での正規化が必須) */
+function makePianoModel(){
+  if(!PIANO_TEMPLATE) return null;
+  const inner=PIANO_TEMPLATE.clone(true);
+  return normalizeToFloor(inner,1.15);
+}
+/* 理科室の顕微鏡(机の上に置く小物、CC-BY) */
+function makeMicroscopeModel(){
+  if(!MICROSCOPE_TEMPLATE) return null;
+  const inner=MICROSCOPE_TEMPLATE.clone(true);
+  return normalizeToFloor(inner,0.32);
+}
+/* 体育館のマット(CC-BY) */
+function makeGymmatModel(){
+  if(!GYMMAT_TEMPLATE) return null;
+  const inner=GYMMAT_TEMPLATE.clone(true);
+  return normalizeToFloor(inner,0.16);
+}
+/* 美術部室のイーゼル(CC-BY、ピアノと同じく旧Google Poly由来) */
+function makeEaselModel(){
+  if(!EASEL_TEMPLATE) return null;
+  const inner=EASEL_TEMPLATE.clone(true);
+  return normalizeToFloor(inner,1.4);
+}
+/* 生徒会室の丸テーブル(CC0) */
+function makeRoundTableModel(){
+  if(!RNDTABLE_TEMPLATE) return null;
+  const inner=RNDTABLE_TEMPLATE.clone(true);
+  return normalizeToFloor(inner,0.75);
 }
 
 function person(opt){
