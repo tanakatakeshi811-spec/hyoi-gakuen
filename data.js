@@ -172,6 +172,55 @@ const CHAR = {
     home:'class2a', lunch:'court_bench2', after:'library'},
 };
 
+/* ---- 生徒89人化: しゅんりさん要望「生徒数を全部で89人にしろ、モデルは
+   色を変えれば一緒で良い」。固有セリフを持つ7人(陽向・ひなの・澪・那由多・
+   芽依・健太・さくら、上のCHARに定義済み)はそのまま据え置き、残り82人は
+   名字+名前の自動組み合わせ+髪/肌/差し色のパレット違いで大量生成する
+   (7+82=89人)。会話は共通のTALK_LINES.genericへ委ねる(actionTalk側の
+   role==='student'フォールバックがそのまま効く、個別分岐は不要)。
+   見た目の色は既存キャラと同じ男女2種の既製3Dモデル(man.glb/woman.glb)を
+   使い回し、person.jsのTINT_MAPによる色塗り替えだけで個体差を出す ---- */
+const GEN_SURNAMES=['佐藤','鈴木','高橋','田中','伊藤','渡辺','山本','中村','小林','加藤',
+  '吉田','山田','佐々木','山口','松本','井上','木村','林','清水','斎藤',
+  '阿部','森','池田','橋本','山崎','石川','中島','前田','藤田','岡田'];
+const GEN_GIVEN_M=['翔太','大輝','拓海','健','悠斗','颯太','陸','蓮','大和','勇人',
+  '和也','直樹','亮太','雄大','新太','拓真','海斗','智也','浩二','光'];
+const GEN_GIVEN_F=['美咲','愛','陽菜','結衣','さやか','真央','千尋','由美','花','舞',
+  '桃子','咲希','恵','直美','遥','葵','美穂','茜','楓','萌'];
+const GEN_HAIR=[0x2b2118,0x3a2c22,0x21232a,0x6b4a24,0x4a3524,0x1c1c1c,0x5a3c28,0x2e2622,0x8a6a3a,0x332018];
+const GEN_SKIN=[0xf0d3b4,0xefceac,0xf3d8ba,0xefd2b2,0xe7c7a2,0xf0dbc0,0xead0ae];
+const GEN_ACCENT=[0xb5352f,0x4a90d9,0x8fae6f,0xd97a2a,0xc9a24a,0xe07fa0,0x7a5ac9,0x3fae9f,0xd94f8a,0x5a8ac9];
+const GEN_EYE=[0x2f2a24,0x3a2a52,0x2a2420,0x4a3524,0x1c1c1c,0x3a3a44];
+/* 3クラス(homeroom/classB/class2a)に均等に散らし、教室ぎゅうぎゅう詰めを
+   避ける(scheduleTarget()はdef.classRoomをそのまま行き先に使う既存仕様、
+   今まで未使用だったフィールドをそのまま活かせる)。昼休み・放課後の
+   行き先もプールから分散して割り当て、校内全体に散らばるようにする */
+function buildGenericStudents(count){
+  const out=[];
+  const rooms=['homeroom','classB','class2a'];
+  const lunchPool=['court_bench','court_bench2','field','library','homeroom'];
+  const afterPool=['gym','field','library','music','art','council','classB','class2a'];
+  for(let i=0;i<count;i++){
+    const male=(i*7)%5<2; // 適当な偏りで男女を振り分ける(厳密な比率は不問)
+    const sur=GEN_SURNAMES[i%GEN_SURNAMES.length];
+    const giv=male?GEN_GIVEN_M[i%GEN_GIVEN_M.length]:GEN_GIVEN_F[i%GEN_GIVEN_F.length];
+    const room=rooms[i%3];
+    out.push({
+      key:'gen'+i, name:sur+' '+giv, role:'student', generic:true,
+      look:{male:male, hairStyle:male?'short':'long',
+        hair:GEN_HAIR[i%GEN_HAIR.length], skin:GEN_SKIN[(i*3+1)%GEN_SKIN.length],
+        uniform:0x24344a, accent:GEN_ACCENT[(i*5+2)%GEN_ACCENT.length],
+        eye:GEN_EYE[(i*2+1)%GEN_EYE.length],
+        noShadow:true}, // 大人数化での描画負荷対策(影を落とすのは主要キャラのみに絞る)
+      home:room, classRoom:room,
+      lunch:lunchPool[(i*2+1)%lunchPool.length],
+      after:afterPool[(i*3+2)%afterPool.length],
+    });
+  }
+  return out;
+}
+const GENERIC_STUDENTS = buildGenericStudents(82);
+
 /* ---- 場所キー→ワールド座標(部屋の中心 or 屋外の目印) ---- */
 function roomCenter(key){
   const rm=ROOMS.find(r=>r.key===key);
@@ -204,7 +253,8 @@ const TALK_LINES = {
   hinata_mid:['陽向「最近よく話すようになったね。なんか嬉しいかも」','陽向「今度、一緒に帰らない?」'],
   hinata_high:['陽向「君といると、なんか落ち着くんだ」','陽向「……その、ずっとこのままでいいのかな」'],
   hinano_line:['ひなの「陽向くーん!　こっち向いて!」','ひなの「（あなた、最近陽向くんの近くにいすぎじゃない?）」'],
-  generic:['……。','特に用はないみたい。'],
+  generic:['……。','特に用はないみたい。','「あ、えっと……よろしく」','「今日の授業、難しいよね」',
+    '「そういえば購買のパン、もう売り切れてたよ」','「別に、なんでもない」'],
   teacher_warn:['「おい、そこの! ちゃんと教室に戻れ」','「不審な動きをするな。見ているぞ」'],
   kuroda_line:['黒田「おい、そこの! ちゃんと教室に戻れ」','黒田「不審な動きをするな。見ているぞ」',
     '黒田「ふらふらしてないで、さっさと次の場所へ行け」'],

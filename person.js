@@ -416,10 +416,23 @@ function person(opt){
     accent:opt.accent!==undefined?opt.accent:0xb5352f,
     eye:opt.eye!==undefined?opt.eye:0x22242a,
   };
+  /* 2026-09-17続報7: 生徒89人化での描画負荷対策。噛み合わせシャドウマップの
+     描画パスは影を落とすオブジェクトの数だけ余計にジオメトリを描き直すため、
+     大量に増えた汎用生徒(opt.noShadow)は影を落とさない(受けもしない)ことで
+     コストを削る。主要キャラ(先生・主人公・固有セリフ持ちの生徒)は今まで
+     通り影ありのまま */
   inner.traverse(function(o){
     if(!o.isMesh) return;
-    o.castShadow=true; o.receiveShadow=true;
+    o.castShadow=!opt.noShadow; o.receiveShadow=!opt.noShadow;
     const arr=Array.isArray(o.material)?o.material:[o.material];
+    /* 2026-09-17続報7で発見: 女性モデル(woman.glb)の頭部は「Hair_Blond」
+       「Hair_Brown」という2種類の髪型ジオメトリが別々のメッシュとして
+       同梱されており、TINT_MAPで両方とも同じ'hair'色に塗り替えていたため
+       常に両方同時に表示され、2つの髪型が重なって頭が白っぽく膨らんだ
+       雲のような塊に見えるバグがあった(89人化で女性生徒を近くで見る
+       機会が増えたことで発覚)。Hair_Brownメッシュを非表示にし、
+       Hair_Blondの1つだけを髪型ジオメトリとして使う */
+    if(arr.some(function(m){ return m.name==='Hair_Brown'; })){ o.visible=false; return; }
     const cloned=arr.map(function(m){
       const nm=m.clone();
       nm.metalness=0.1; nm.roughness=0.85; // PBRの金属っぽい光沢を抑えて素朴な低ポリ見た目に
@@ -484,7 +497,7 @@ function person(opt){
 /* 歩行アニメーション。glTFに同梱のIdle/Walk/気絶(Death)クリップを
    AnimationMixerでクロスフェード再生する(以前の手動ボーン角度計算から
    置き換え済み) */
-function animateWalk(rig,dt,moving,speedMul){
+function animateWalk(rig,dt,moving,speedMul,skipMixer){
   const u=rig.userData;
   if(!u||!u.mixer) return;
   const actions=u.actions;
@@ -497,5 +510,10 @@ function animateWalk(rig,dt,moving,speedMul){
     u.currentAction=target;
   }
   if(u.currentAction) u.currentAction.timeScale=(!u.faint&&moving)?(speedMul||1):1;
-  u.mixer.update(dt);
+  /* 2026-09-17続報7: 生徒89人化での負荷対策。AnimationMixer.update()は
+     スキンメッシュのボーン行列を毎回計算し直すため最もCPUコストが高い
+     処理で、プレイヤーから遠い汎用生徒はskipMixer=trueの時だけ更新を
+     間引く(呼び出し側で数フレームに1回だけfalseになるよう制御する)。
+     見た目はコマ落ちするだけで壊れない(次に更新される時にまとめて進む) */
+  if(!skipMixer) u.mixer.update(dt);
 }

@@ -630,27 +630,69 @@ function initPlayerObj(){
 /* ---------------- NPC ---------------- */
 let npcs=[];
 const NPC_KEYS=['hinata','hinano','kuroda','kiryuu','mio','nayuta','mei','janitor','kenta','sakura'];
+/* 2026-09-17続報7: 生徒89人化。固有キャラ(NPC_KEYS、CHARに定義)+
+   自動生成した82人(data.jsのGENERIC_STUDENTS)を同じロジックで組み立てる
+   ため、共通処理をaddNpc()に切り出した */
+function addNpc(key,def){
+  const rig=person(def.look);
+  const home=jitterPt(roomCenter(def.home),key);
+  rig.position.set(home.x,0,home.z);
+  scene.add(rig);
+  npcs.push({key:key,name:def.name,role:def.role,def:def,rig:rig,
+    x:home.x,z:home.z,yaw:0,path:[],patrolIdx:0,retimer:Math.random()*2,
+    visionRange:(def.vision||1)*9,visionAngle:0.85,
+    /* 2026-09-17続報7で発見した重大バグの修正: blinded(消火器で視界を
+       奪われているか)をここで初期化していなかったため、一度も消火器を
+       浴びていないNPCでもnpc.blindedがundefinedのままで、updateNPC()の
+       `blindMark.visible=npc.blinded`がvisibleにundefinedを代入していた。
+       three.js(r128)の描画側可視判定は`object.visible===false`という
+       厳密比較のため、undefinedはfalseと見なされず「見えないはずの目印
+       (顔の周りの白い霧の塊)」が全NPCで常時描画されてしまっていた
+       (89人化でheadless Chromeの近接スクリーンショットにより発覚。
+       過去のNPC全員が対象だった潜在バグで、今回の人数増加で誰の目にも
+       明らかになった)。blinded:falseの明示初期化で解消 */
+    blinded:false, blindT:0,
+    faint:false,faintT:0,captive:false,witness:0,scared:false,transferred:false});
+}
 function buildNPCs(){
   npcs=[];
-  NPC_KEYS.forEach(function(k){
-    const def=CHAR[k];
-    const rig=person(def.look);
-    const home=roomCenter(def.home);
-    rig.position.set(home.x,0,home.z);
-    scene.add(rig);
-    npcs.push({key:k,name:def.name,role:def.role,def:def,rig:rig,
-      x:home.x,z:home.z,yaw:0,path:[],patrolIdx:0,retimer:0,
-      visionRange:(def.vision||1)*9,visionAngle:0.85,
-      faint:false,faintT:0,captive:false,witness:0,scared:false,transferred:false});
-  });
+  NPC_KEYS.forEach(function(k){ addNpc(k,CHAR[k]); });
+  GENERIC_STUDENTS.forEach(function(def){ addNpc(def.key,def); });
 }
 function npcByKey(k){ return npcs.find(function(n){ return n.key===k; }); }
+
+/* 2026-09-17続報7: 生徒89人化で、同じroomCenter()の1点にNPC同士の当たり
+   判定なしで何十人も収束すると、モデル同士が完全に重なって描画が壊れて
+   見える(頭が真っ白なブロブに見える等のz-fighting)ことをheadless Chrome
+   のスクリーンショットで実際に確認した。キー文字列から作る安定した
+   ハッシュ値でNPCごとに小さな固定オフセット(最大±3.2単位)を持たせ、
+   同じ目的地に向かっても「集まって固まる」のではなく「近くにばらけて
+   集まる」ように見た目だけ調整する(部屋は最小でも一辺12〜16単位はあり、
+   この程度のオフセットなら壁にめり込む心配はない)。FNV-1aハッシュを
+   採用(単純な「h=h*31+charCode」だと'gen0'/'gen3'/'gen6'のように末尾の
+   数字だけ違う似たキー文字列でオフセットがほぼ揃ってしまい、ばらけさせる
+   目的を果たせなかった) */
+function hashStr(s){
+  let h=0x811c9dc5;
+  for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,0x01000193); }
+  return h>>>0;
+}
+function jitterPt(pt,key){
+  if(!pt) return pt;
+  const h=hashStr(key);
+  const ox=(((h&0xFFFF)/0xFFFF)-0.5)*6.4;
+  const oz=((((h>>16)&0xFFFF)/0xFFFF)-0.5)*6.4;
+  return {x:pt.x+ox, z:pt.z+oz};
+}
 
 const PATROL_TEACHER=[{x:25*TILE,z:6*TILE},{x:25*TILE,z:13*TILE},{x:10*TILE,z:13*TILE},
   {x:25*TILE,z:13*TILE},{x:41*TILE,z:13*TILE},{x:25*TILE,z:20*TILE},{x:25*TILE,z:26*TILE}];
 const PATROL_JANITOR=[{x:80,z:150},{x:150,z:230},{x:230,z:255},{x:150,z:180},{x:90,z:200}];
 
 function scheduleTarget(npc){
+  return jitterPt(scheduleTargetRaw(npc), npc.key);
+}
+function scheduleTargetRaw(npc){
   const per=PERIODS[player.periodIdx];
   const def=npc.def;
   if(npc.key==='kiryuu') return roomCenter('nurse');
@@ -694,7 +736,7 @@ function followPath(npc,dt,speedMul){
   npc.yaw=Math.atan2(dx,dz);
   return moved;
 }
-function updateNPC(npc,dt){
+function updateNPC(npc,dt,idx){
   if(npc.transferred||npc.captive){ npc.rig.visible=false; return; }
   npc.rig.visible=true;
   if(npc.blinded){
@@ -732,7 +774,24 @@ function updateNPC(npc,dt){
   npc.rig.position.set(npc.x,0,npc.z);
   npc.rig.rotation.y=npc.yaw;
   const moving=!!(npc.path&&npc.path.length);
-  animateWalk(npc.rig,dt,moving,0.9);
+  /* 2026-09-17続報7: 生徒89人化での負荷対策(2段階)。
+     ①AnimationMixerの更新(ボーン行列計算)が一番重いので、プレイヤーから
+     少し離れた汎用生徒(def.generic)は3フレームに1回だけ更新する
+     (持ち回りでidxに応じてずらすので、集団としては滑らかに見える)。
+     ②さらに遠い(=画面上でもほぼ視認できない距離、霧の始まる60単位に
+     近い)汎用生徒は描画自体を止める(rig.visible=false)。three.jsの
+     フラスタムカリングは「画面外」しか除外してくれないため、見通しの
+     良い廊下などで大人数が同時に画面に入るケースの保険として、距離
+     ベースの間引きも別途かけておく(ロジック=座標更新・当たり判定・
+     疑いの目等は裏で継続するので、ゲーム内容には一切影響しない) */
+  const distSq = dist2(npc.x,npc.z,player.x,player.z);
+  const isGeneric = !!npc.def.generic;
+  const veryFar = isGeneric && distSq>85*85;
+  npc.rig.visible = !veryFar;
+  if(veryFar) return; // 描画しないなら歩行アニメ更新もまとめて省略
+  const farFromPlayer = isGeneric && distSq>45*45;
+  const skipMixer = farFromPlayer && (frameTick%3)!==(idx%3);
+  animateWalk(npc.rig,dt,moving,0.9,skipMixer);
   npc.rig.userData.witnessMark.visible = npc.witness>0;
   npc.rig.userData.faintMark.visible = npc.faint;
   npc.rig.userData.blindMark.visible = npc.blinded;
@@ -1644,12 +1703,14 @@ function updateCamera(){
 }
 
 /* ---------------- メインループ ---------------- */
+let frameTick=0; // 2026-09-17続報7: 生徒89人化での間引き処理用のフレームカウンタ
 function animate(){
   requestAnimationFrame(animate);
   const dt=Math.min(clockObj.getDelta(),0.1);
+  frameTick++;
   if(!gamePaused&&!ended){
     updatePlayer(dt);
-    npcs.forEach(function(n){ updateNPC(n,dt); });
+    npcs.forEach(function(n,i){ updateNPC(n,dt,i); });
     updateTakedown(dt);
     checkShedExposure(dt);
     tickTime(dt);
