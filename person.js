@@ -317,6 +317,81 @@ function attachWeaponVisual(rig,weaponKey){
   if(model){ model.rotation.set(0.3,0,0.15); slot.add(model); }
 }
 
+/* 2026-09-17続報5: 武器ごとの「刺す/振るう」攻撃モーション。この
+   モデルは既製glTF(Quaternius)のスキンメッシュで、男女でボーン名の
+   構成が違う(HumanArmature系/CharacterArmature系)ため、肘・肩の
+   ボーンを名前で直接掴んで動かすのは壊れやすい。代わりに、既存の
+   heldSlot(道具を持たせている固定オフセットのGroup、faintMark等と
+   同じ「外付けの目印」パターン)自体をtakedownの経過(0〜1)に応じて
+   動かすことで、ボーン構成に依存しない安全な方法で武器ごとに違う
+   軌道を再現する。style:
+     thrust=鋭く突く(ナイフ)  smash=振りかぶって叩きつける(教科書/三角コーン)
+     arc=横に薙ぐ(ほうき/モップ/影の手)  drill=ねじ込む(ドライバー)
+     flurry=連打(太鼓のバチ)  choke=引き絞る(縄跳び) */
+const WEAPON_SWING={
+  book:  {style:'smash', windup:0.55, amp:1.0},
+  broom: {style:'arc',   windup:0.5,  amp:1.3},
+  mop:   {style:'arc',   windup:0.5,  amp:1.05},
+  cone:  {style:'smash', windup:0.6,  amp:0.85},
+  rope:  {style:'choke', windup:0.45, amp:0.7},
+  drum:  {style:'flurry',windup:0.0,  amp:0.55},
+  knife: {style:'thrust',windup:0.6,  amp:1.0},
+  driver:{style:'drill', windup:0.55, amp:0.8},
+  shadow:{style:'arc',   windup:0.35, amp:1.6},
+};
+function easeOutQuad(x){ x=Math.max(0,Math.min(1,x)); return 1-(1-x)*(1-x); }
+function applyWeaponSwingPose(rig,weaponKey,t){
+  const slot=rig.userData.heldSlot;
+  if(!slot) return;
+  const p=WEAPON_SWING[weaponKey]||WEAPON_SWING.book;
+  const tt=Math.max(0,Math.min(1,t));
+  const wu=Math.max(0.001,p.windup);
+  const raise=Math.sin(Math.min(1,tt/wu)*Math.PI/2); // 0→1(構え/溜め)
+  const strike=easeOutQuad(Math.max(0,(tt-p.windup)/Math.max(0.001,1-p.windup))); // 0→1(振り/突き)
+  let dx=0,dy=0,dz=0,rx=0,ry=0,rz=0,lean=0;
+  if(p.style==='thrust'){
+    dz = -0.12*raise*p.amp + 0.46*p.amp*strike;
+    rx = -0.35*raise*p.amp + 0.55*p.amp*strike;
+    lean = -0.08*raise + 0.22*strike; // 溜めで少し引き、突きで前に踏み込む
+  } else if(p.style==='smash'){
+    rx = -1.5*p.amp*raise + 1.9*p.amp*strike;
+    dy = 0.22*p.amp*raise - 0.18*p.amp*strike;
+    lean = -0.1*raise + 0.28*strike; // 振りかぶりで軽く反り、叩きつけで前傾
+  } else if(p.style==='arc'){
+    ry = 0.9*p.amp*raise - 1.7*p.amp*strike;
+    rx = 0.3*p.amp*raise;
+    lean = 0.05*raise + 0.16*strike;
+  } else if(p.style==='drill'){
+    dz = -0.08*raise*p.amp + 0.32*p.amp*strike;
+    rz = strike*Math.PI*1.6*p.amp;
+    lean = -0.06*raise + 0.2*strike;
+  } else if(p.style==='flurry'){
+    rx = Math.sin(tt*Math.PI*11)*0.55*p.amp;
+    dz = Math.abs(Math.sin(tt*Math.PI*11))*0.14*p.amp;
+    lean = 0.08+Math.abs(Math.sin(tt*Math.PI*11))*0.06;
+  } else if(p.style==='choke'){
+    dx = -0.1*raise*p.amp + 0.16*p.amp*strike;
+    dz = 0.06*raise*p.amp - 0.1*p.amp*strike;
+    ry = -0.4*p.amp*strike;
+    lean = 0.1*strike;
+  }
+  const H=rig.userData.H||2.6;
+  slot.position.set(0.3+dx, H*0.54+dy, 0.14+dz);
+  slot.rotation.set(rx,ry,rz);
+  /* ボーン(肘/肩)を直接掴む代わりに、体全体をわずかに前傾させて「踏み込んで
+     攻撃している」印象を補強する(GLTFモデルは男女でボーン名の構成が違い
+     直接掴むのは壊れやすいため、外側のrigごと傾けるだけに留める安全策) */
+  rig.rotation.x=lean;
+}
+function resetWeaponPose(rig){
+  const slot=rig.userData.heldSlot;
+  if(!slot) return;
+  const H=rig.userData.H||2.6;
+  slot.position.set(0.3, H*0.54, 0.14);
+  slot.rotation.set(0,0,0);
+  rig.rotation.x=0;
+}
+
 function person(opt){
   if(!CHAR_TEMPLATES){
     throw new Error('preloadCharacterModels()の完了前にperson()が呼ばれた');
