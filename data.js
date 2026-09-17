@@ -237,6 +237,18 @@ function buildGenericStudents(count){
 }
 const GENERIC_STUDENTS = buildGenericStudents(82);
 
+/* ---- 2026-09-18追記: NPCの「一時的な単独行動」用の目的地候補。
+   専用のトイレ/購買部という部屋はマップに無いため、既存の廊下
+   (corridorN/corridorE)上の数か所を休憩スポットとして点だけで定義する
+   (壁・衝突判定には一切手を入れない、court_bench等と同じ「点」形式) ---- */
+const ERRAND_SPOTS = [
+  {label:'トイレ(1階北)',  x:25.5*TILE, z:9*TILE},
+  {label:'トイレ(1階南)',  x:25.5*TILE, z:18*TILE},
+  {label:'購買部の近く',    x:25.5*TILE, z:24*TILE},
+  {label:'廊下の自販機',    x:44*TILE,   z:13*TILE},
+  {label:'渡り廊下',        x:8*TILE,    z:13*TILE},
+];
+
 /* ---- 場所キー→ワールド座標(部屋の中心 or 屋外の目印) ---- */
 function roomCenter(key){
   const rm=ROOMS.find(r=>r.key===key);

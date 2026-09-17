@@ -654,8 +654,15 @@ function addNpc(key,def){
   const home=jitterPt(roomCenter(def.home),key);
   rig.position.set(home.x,0,home.z);
   scene.add(rig);
+  /* 2026-09-18 密集緩和: NPCごとに安定した「単独行動(トイレ等)に出る
+     確率」と「移動タイミングの個体差(数秒〜十数秒のズレ)」をキー文字列
+     からのハッシュで決定的に割り当てる。89人分を手作業で書かず、
+     パラメータの振り分けだけで個体差を出す方式 */
+  const errandChance=0.006+(hashStr(key+'|errand')%1000)/1000*0.02;
+  const staggerSeed=(hashStr(key+'|stagger')%1000)/1000*9;
   npcs.push({key:key,name:def.name,role:def.role,def:def,rig:rig,
     x:home.x,z:home.z,yaw:0,path:[],patrolIdx:0,retimer:Math.random()*2,
+    errand:false,errandT:0,errandChance:errandChance,staggerSeed:staggerSeed,
     visionRange:(def.vision||1)*9,visionAngle:0.85,
     /* 2026-09-17続報7で発見した重大バグの修正: blinded(消火器で視界を
        奪われているか)をここで初期化していなかったため、一度も消火器を
@@ -705,25 +712,86 @@ const PATROL_TEACHER=[{x:25*TILE,z:6*TILE},{x:25*TILE,z:13*TILE},{x:10*TILE,z:13
   {x:25*TILE,z:13*TILE},{x:41*TILE,z:13*TILE},{x:25*TILE,z:20*TILE},{x:25*TILE,z:26*TILE}];
 const PATROL_JANITOR=[{x:80,z:150},{x:150,z:230},{x:230,z:255},{x:150,z:180},{x:90,z:200}];
 
-function scheduleTarget(npc){
-  return jitterPt(scheduleTargetRaw(npc), npc.key);
-}
-function scheduleTargetRaw(npc){
+/* 2026-09-18 NPC密集緩和(しゅんりさんの依頼「人が一つのところに集まり
+   すぎてる、一人一人ルートが決められてて、トイレとか時間によって行動が
+   変わるようにして」への対応)。
+   原因調査の結果: scheduleTargetRaw()は同じ授業中・同じクラスのNPC全員に
+   対して「roomCenter()の1点+ジッター最大±3.2」という、部屋の広さに対して
+   極端に狭い範囲しか返していなかった(89人化で1クラス約27〜30人が同じ
+   小さな範囲に密集していた)。休み時間(break)も25*TILE,13*TILE付近の
+   8x4単位のごく狭いエリアに"全校生徒"が集まる仕様で、密集の最大の原因
+   だった。
+   対策: 部屋の実寸(roomWorldBounds)を使い、その時点で同じ部屋を
+   目指しているNPCの人数の中での自分の順番から座席のようにマス目状へ
+   分散させるseatGrid()方式に変更。休み時間も「教室に残る/廊下に出る」を
+   個体ごとに決定的に振り分け、単一の狭いスポットへの集中をやめた */
+function scheduleRoomKey(npc){
   const per=PERIODS[player.periodIdx];
   const def=npc.def;
-  if(npc.key==='kiryuu') return roomCenter('nurse');
-  if(npc.key==='mio') return roomCenter('library');
-  if(npc.key==='nayuta') return roomCenter('council');
-  if(npc.key==='mei') return roomCenter('art');
+  if(npc.key==='kiryuu') return 'nurse';
+  if(npc.key==='mio') return 'library';
+  if(npc.key==='nayuta') return 'council';
+  if(npc.key==='mei') return 'art';
   const myRoom=def.classRoom||'homeroom';
   if(per.type==='class'||per.type==='home'){
-    if(myRoom==='homeroom'&&per.room) return roomCenter(per.room);
-    return roomCenter(myRoom);
+    if(myRoom==='homeroom'&&per.room) return per.room;
+    return myRoom;
   }
-  if(per.type==='break') return {x:25*TILE+(Math.random()*8-4), z:13*TILE+(Math.random()*4-2)};
-  if(per.type==='lunch') return roomCenter(def.lunch||myRoom);
-  if(per.type==='after') return roomCenter(def.after||myRoom);
-  return roomCenter(myRoom);
+  if(per.type==='break'){
+    // 個体ごとに安定した割合(約45%)で「教室に残っておしゃべり」、
+    // 残りは「廊下に出る」に分かれる(全員一斉に同じ狭い場所へ向かわない)
+    return (hashStr(npc.key+'|brk')%100)<45 ? myRoom : 'corridorN';
+  }
+  if(per.type==='lunch') return def.lunch||myRoom;
+  if(per.type==='after') return def.after||myRoom;
+  return myRoom;
+}
+/* 部屋の実寸(roomWorldBounds)に応じて、人数分をマス目状に均等配置する。
+   部屋が狭い/人数が少なければ自然と1点に近くなり、広い/多ければ
+   きちんと部屋全体に広がる */
+function seatGrid(roomKey,idx,total){
+  const b=roomWorldBounds(roomKey);
+  if(!b) return null;
+  const margin=2.2;
+  const w=Math.max(0.1,(b.x1-b.x0)-margin*2);
+  const d=Math.max(0.1,(b.z1-b.z0)-margin*2);
+  const cols=Math.max(1,Math.round(Math.sqrt(Math.max(1,total)*w/d)));
+  const rows=Math.max(1,Math.ceil(total/cols));
+  const col=idx%cols, row=Math.floor(idx/cols)%rows;
+  const gx=cols>1?col/(cols-1):0.5;
+  const gz=rows>1?row/(rows-1):0.5;
+  return {x:b.x0+margin+gx*w, z:b.z0+margin+gz*d};
+}
+/* roomKeyが実在の部屋(ROOMS)ならseatGrid、court_bench等の点だけの場所
+   なら人数に応じて広がる範囲でジッターする(1人しかいなければ従来通り
+   ほぼ中心、大勢いれば広めに散る) */
+function crowdTarget(npc,key){
+  if(!key) return null;
+  const mates=npcs.filter(function(o){
+    return o!==npc && !o.transferred && !o.captive && !o.bagged && scheduleRoomKey(o)===key;
+  });
+  const idx=mates.filter(function(o){ return o.key<npc.key; }).length;
+  const total=mates.length+1;
+  const g=seatGrid(key,idx,total);
+  if(g) return g;
+  const base=roomCenter(key);
+  const r=Math.min(9,2+Math.sqrt(total)*1.1);
+  const h=hashStr(npc.key+'|'+key);
+  const ox=(((h&0xFFFF)/0xFFFF)-0.5)*2*r;
+  const oz=((((h>>16)&0xFFFF)/0xFFFF)-0.5)*2*r;
+  return {x:base.x+ox, z:base.z+oz};
+}
+function scheduleTarget(npc){
+  return crowdTarget(npc, scheduleRoomKey(npc));
+}
+/* NPCごとの確率・持続時間で「トイレ・購買部等への一時的な単独行動」を
+   開始する(全員同時ではなく、addNpc()で個体ごとに振り分けたerrandChance
+   に従いポツポツと時間差で発生する) */
+function startErrand(npc){
+  const spot=ERRAND_SPOTS[Math.floor(Math.random()*ERRAND_SPOTS.length)];
+  npc.errand=true;
+  npc.errandT=16+Math.random()*20; // 移動+滞在込みで約16〜36秒
+  npc.path=computePath({x:npc.x,z:npc.z},spot);
 }
 function computePath(from,to){
   const rFrom=roomKeyAt(from.x,from.z), rTo=roomKeyAt(to.x,to.z);
@@ -791,11 +859,25 @@ function updateNPC(npc,dt,idx){
       if(!npc.path||!npc.path.length) npc.path=[roomCenter('library')];
       followPath(npc,dt,0.6);
     } else {
+      /* 2026-09-18 単独行動(トイレ等)の進行。errandT(移動+滞在の
+         残り時間)が尽きたら通常スケジュールに復帰させる */
+      if(npc.errand){
+        npc.errandT-=dt;
+        if(npc.errandT<=0){ npc.errand=false; npc.retimer=0; }
+      }
       npc.retimer-=dt;
       if(npc.retimer<=0){
-        npc.retimer=2+Math.random()*2;
-        const t=scheduleTarget(npc);
-        if(t) npc.path=computePath({x:npc.x,z:npc.z},t);
+        /* 個体ごとのstaggerSeed(0〜9秒)を上乗せし、移動タイミングを
+           数秒〜十数秒ずらす(廊下での一斉密集・詰まりを緩和) */
+        npc.retimer=1.5+Math.random()*2+npc.staggerSeed;
+        if(npc.errand){
+          // 単独行動の目的地に向かっている/滞在中はそのまま継続
+        } else if(npc.role!=='teacher' && Math.random()<npc.errandChance){
+          startErrand(npc);
+        } else {
+          const t=scheduleTarget(npc);
+          if(t) npc.path=computePath({x:npc.x,z:npc.z},t);
+        }
       }
       followPath(npc,dt,1.0);
     }
