@@ -7,6 +7,12 @@ canvas{display:block;touch-action:none}
 #hud{position:fixed;inset:0;pointer-events:none;z-index:5}
 .pe{pointer-events:auto}
 
+/* 2026-09-17続報8: 恋愛対象(陽向)に近づくほど画面がピンクに染まる演出。
+   距離に応じてgame.js側でopacityだけを書き換える(0で完全に見えない) */
+#affinityOverlay{position:fixed;inset:0;pointer-events:none;z-index:4;
+  background:radial-gradient(ellipse at 50% 60%,rgba(255,150,200,0.05) 0%,rgba(255,60,140,0.55) 100%);
+  opacity:0;transition:opacity .35s ease-out}
+
 /* ---- タイトル画面 ---- */
 #title{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
   flex-direction:column;background:radial-gradient(ellipse at 50% 30%,#241a3a,#0a0812 75%);z-index:50;gap:14px;

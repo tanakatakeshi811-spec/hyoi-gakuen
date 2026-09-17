@@ -513,6 +513,40 @@ function person(opt){
   return g;
 }
 
+/* 2026-09-17続報8: 恋愛対象(陽向)・ライバル(ひなの)を遠目でも見分けられる
+   ようにするハイライト。r128でもポストプロセス無しで確実に動く方式として、
+   頭上に光るビーコン(円柱)+足元の脈動するリングを追加する(OutlinePass等の
+   本格的な輪郭線ポストプロセスは今回のプロジェクト構成(EffectComposer未導入)
+   に追加すると変更範囲が大きくなるため見送り、代わりにこの「光る目印」で
+   「フィールド上で目立つように光る」という要望を満たす) */
+function addAffinityAura(rig,color){
+  const H=rig.userData.H||2.6;
+  const beamMat=new THREE.MeshBasicMaterial({color:color,transparent:true,opacity:0.32,
+    blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide});
+  const beam=new THREE.Mesh(new THREE.CylinderGeometry(0.16,0.04,9,10,1,true),beamMat);
+  beam.position.y=H+4.5;
+  rig.add(beam);
+  const ringMat=new THREE.MeshBasicMaterial({color:color,transparent:true,opacity:0.8,
+    blending:THREE.AdditiveBlending,depthWrite:false,side:THREE.DoubleSide});
+  const ring=new THREE.Mesh(new THREE.TorusGeometry(0.55,0.055,8,20),ringMat);
+  ring.rotation.x=Math.PI/2; ring.position.y=0.06;
+  rig.add(ring);
+  const glow=new THREE.PointLight(color,0.9,4.5);
+  glow.position.y=H*0.55;
+  rig.add(glow);
+  rig.userData.affinityAura={beam:beam,ring:ring,glow:glow};
+}
+/* 毎フレーム呼ぶ更新(ビーコン/リングの脈動)。プレイヤーからの距離に応じた
+   演出は行わず、常に一定のペースで光らせる(遠くからでも見つけやすいように) */
+function updateAffinityAura(rig,t){
+  const a=rig.userData.affinityAura;
+  if(!a) return;
+  const pulse=0.5+0.5*Math.sin(t*2.4);
+  a.ring.scale.setScalar(1+pulse*0.25);
+  a.ring.material.opacity=0.5+pulse*0.4;
+  a.beam.material.opacity=0.22+pulse*0.16;
+}
+
 /* 歩行アニメーション。glTFに同梱のIdle/Walk/気絶(Death)クリップを
    AnimationMixerでクロスフェード再生する(以前の手動ボーン角度計算から
    置き換え済み) */
