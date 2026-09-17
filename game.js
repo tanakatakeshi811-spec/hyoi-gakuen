@@ -926,7 +926,15 @@ function actionSpray(npc){
   refreshActionMenu();
 }
 
-let takedown=null; // {npcKey, t, need}
+/* 2026-09-17続報5: 「背後からじゃないとできないのがうざい」というフィード
+   バックを受けて、正面からでも発動できるように変更。ただし正面は
+   ①背後よりチャンネリング(構え)時間が長い(FRONT_TIME_MULで約1.9倍)、
+   ②構えている間、相手にランダムで勘づかれて失敗する独自リスクがある
+   (背後は相手から死角にいるので勘づかれる余地が無く、このリスクは0のまま)、
+   という2軸で「正面は明確にハイリスク」になるようにした。影の手
+   (supernatural)はテネブラの力そのものなので元から向きを問わない仕様を維持 */
+const FRONT_TIME_MUL=1.9, FRONT_NOTICE_PER_SEC=0.16;
+let takedown=null; // {npcKey, t, need, behindOk}
 function startTakedown(npc){
   const w=currentWeapon();
   if(w.needPossession&&player.possession<w.needPossession){ toast('まだその力は目覚めていない。'); return; }
@@ -934,24 +942,37 @@ function startTakedown(npc){
   const d=Math.hypot(dx,dz);
   if(d>w.range){ toast('近づかないと無理そうだ。'); return; }
   const facing=Math.atan2(dx,dz);
-  const behindOk = Math.abs(angNorm(facing-npc.yaw))<1.6; // 相手の後方寄りにいるか(=相手が背を向けている)
-  if(!behindOk && !w.supernatural){ toast('正面からでは気づかれてしまう。背後から近づこう。'); return; }
-  takedown={npcKey:npc.key,t:0,need:w.time};
-  toast('……気配を殺して、道具を構えた。');
+  const behindOk = Math.abs(angNorm(facing-npc.yaw))<1.6 || !!w.supernatural; // 相手の後方寄りにいるか(=相手が背を向けている)
+  playerObj.rotation.y=facing; // 構え始めに相手へまっすぐ向き直る(モーション演出のため)
+  takedown={npcKey:npc.key,t:0,need:behindOk?w.time:w.time*FRONT_TIME_MUL,behindOk:behindOk};
+  toast(behindOk?'……気配を殺して、道具を構えた。':'正面から……!勘づかれる前に、一気に決める!');
+}
+function endTakedown(){
+  takedown=null; hideRing(); resetWeaponPose(playerObj);
 }
 function updateTakedown(dt){
   if(!takedown) return;
   const npc=npcByKey(takedown.npcKey);
   const w=currentWeapon();
-  if(!npc||npc.faint||npc.captive||npc.transferred){ takedown=null; hideRing(); return; }
+  if(!npc||npc.faint||npc.captive||npc.transferred){ endTakedown(); return; }
   const dx=npc.x-playerObj.position.x, dz=npc.z-playerObj.position.z;
   const d=Math.hypot(dx,dz);
-  if(d>w.range+0.6){ takedown=null; hideRing(); toast('相手が離れてしまった……'); return; }
+  if(d>w.range+0.6){ endTakedown(); toast('相手が離れてしまった……'); return; }
+  if(!takedown.behindOk && Math.random()<FRONT_NOTICE_PER_SEC*dt){
+    // 正面から構えている間は毎秒一定確率で相手に勘づかれ、失敗する
+    npc.witness=Math.max(npc.witness,1);
+    const seen=witnessesAt(npc.x,npc.z,npc.key);
+    gainSuspicion(20+15*seen.length,'正面から近づいたせいで、勘づかれてしまった……!!');
+    endTakedown();
+    toast(npc.name+'に勘づかれた……!取り押さえは失敗!');
+    return;
+  }
   takedown.t+=dt;
   showRing(takedown.t/takedown.need);
+  applyWeaponSwingPose(playerObj,w.key,takedown.t/takedown.need);
   if(takedown.t>=takedown.need){
     finishTakedown(npc,w);
-    takedown=null; hideRing();
+    endTakedown();
   }
 }
 function finishTakedown(npc,w){
@@ -1327,7 +1348,7 @@ function buildActionsFor(target){
       if(npc.key==='hinano'&&!npc.scared){
         acts.push({label:'脅す',sub:'勇気を削る／目撃注意',onClick:function(){ actionThreaten(npc); }});
       }
-      acts.push({label:'気絶させる',sub:'道具:'+currentWeapon().name+'／背後から',onClick:function(){ startTakedown(npc); }});
+      acts.push({label:'気絶させる',sub:'道具:'+currentWeapon().name+'／背後推奨(正面は時間↑&勘づかれるリスク)',onClick:function(){ startTakedown(npc); }});
       if(npc.witness>0) acts.push({label:'なだめる',sub:'目撃の記憶を落ち着かせる',onClick:function(){ actionCalm(npc); }});
     } else if(npc.witness>0){
       acts.push({label:'なだめる',sub:'目撃の記憶を落ち着かせる',onClick:function(){ actionCalm(npc); }});
@@ -1507,15 +1528,20 @@ function angLerp(a,b,t){
 }
 function updatePlayer(dt){
   let mx=0,mz=0;
-  if(keys['w']||keys['arrowup']) mz-=1;
-  if(keys['s']||keys['arrowdown']) mz+=1;
-  if(keys['a']||keys['arrowleft']) mx-=1;
-  if(keys['d']||keys['arrowright']) mx+=1;
-  /* 2026-09-17続報3: [[放課後の居残り]]と同じくキー入力とスティック入力を
-     加算合成し、その合成ベクトルの大きさ(mag)で速度を連続的に変える
-     アナログ制御にした(以前はスティックがキー入力を丸ごと上書きする上、
-     閾値を一歩でも超えたら常に最大速度というデジタル制御だった) */
-  mx+=moveVec.x; mz+=moveVec.y;
+  /* 2026-09-17続報5: 「気絶させる」を構えている間(takedown中)は移動入力を
+     受け付けず、その場で武器を振るモーションに専念させる(構え途中で歩き
+     回ると振り付けが破綻するため) */
+  if(!takedown){
+    if(keys['w']||keys['arrowup']) mz-=1;
+    if(keys['s']||keys['arrowdown']) mz+=1;
+    if(keys['a']||keys['arrowleft']) mx-=1;
+    if(keys['d']||keys['arrowright']) mx+=1;
+    /* 2026-09-17続報3: [[放課後の居残り]]と同じくキー入力とスティック入力を
+       加算合成し、その合成ベクトルの大きさ(mag)で速度を連続的に変える
+       アナログ制御にした(以前はスティックがキー入力を丸ごと上書きする上、
+       閾値を一歩でも超えたら常に最大速度というデジタル制御だった) */
+    mx+=moveVec.x; mz+=moveVec.y;
+  }
   player.sneak=!!keys['q']||mobileSneak;
   const mag=Math.hypot(mx,mz);
   let moving=false;
