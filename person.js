@@ -34,6 +34,7 @@ function loadGLTF(url){
 let TREE_TEMPLATE=null, DESK_TEMPLATE=null, BLACKBOARD_TEMPLATE=null, BOOKCASE_TEMPLATE=null;
 let LOCKER_TEMPLATE=null, BED_TEMPLATE=null, PIANO_TEMPLATE=null, MICROSCOPE_TEMPLATE=null,
   GYMMAT_TEMPLATE=null, EASEL_TEMPLATE=null, RNDTABLE_TEMPLATE=null;
+let KNIFE_TEMPLATE=null, SCREWDRIVER_TEMPLATE=null;
 /* モデルの原点位置や単位系がバラバラ(desk.glbと同じく高さ方向の中央が原点の
    ものや、piano/easelのように昔のGoogle Poly由来で座標が現実の数万倍
    スケールで焼き込まれているものが混在する)なので、Box3の実測値から
@@ -47,6 +48,21 @@ function normalizeToFloor(root,targetH){
   const scale=size.y>0?targetH/size.y:1;
   root.scale.setScalar(scale);
   root.position.set(-center.x*scale, -box.min.y*scale, -center.z*scale);
+  const wrap=new THREE.Group();
+  wrap.add(root);
+  return wrap;
+}
+/* 手持ち武器用の正規化。床置き家具と違い「原点=接地面」ではなく手の位置に
+   そのまま持たせたいので、一番長い辺を基準に一様スケール→中心(x,y,z全部)を
+   原点に揃える(モデルの向き=長辺がどの軸かはモデルごとにバラバラなため) */
+function normalizeCentered(root,targetLen){
+  const box=new THREE.Box3().setFromObject(root);
+  const size=new THREE.Vector3(); box.getSize(size);
+  const center=new THREE.Vector3(); box.getCenter(center);
+  const maxDim=Math.max(size.x,size.y,size.z);
+  const scale=maxDim>0?targetLen/maxDim:1;
+  root.scale.setScalar(scale);
+  root.position.set(-center.x*scale,-center.y*scale,-center.z*scale);
   const wrap=new THREE.Group();
   wrap.add(root);
   return wrap;
@@ -78,12 +94,14 @@ function preloadCharacterModels(){
     loadGLTF('assets/models/gymmat.glb'),
     loadGLTF('assets/models/easel.glb'),
     loadGLTF('assets/models/rndtable.glb'),
+    loadGLTF('assets/models/knife.glb'),
+    loadGLTF('assets/models/screwdriver.glb'),
   ]).then(function(results){
     const manGltf=results[0], womanGltf=results[1], treeGltf=results[2],
       deskGltf=results[3], blackboardGltf=results[4], bookcaseGltf=results[5],
       lockerGltf=results[6], bedGltf=results[7], pianoGltf=results[8],
       microscopeGltf=results[9], gymmatGltf=results[10], easelGltf=results[11],
-      rndtableGltf=results[12];
+      rndtableGltf=results[12], knifeGltf=results[13], screwdriverGltf=results[14];
     CHAR_TEMPLATES = {
       male:  {scene:manGltf.scene,   animations:manGltf.animations,
         scale:TARGET_HEIGHT.male/RAW_HEIGHT.male},
@@ -92,7 +110,8 @@ function preloadCharacterModels(){
     };
     [treeGltf.scene,deskGltf.scene,blackboardGltf.scene,bookcaseGltf.scene,
       lockerGltf.scene,bedGltf.scene,pianoGltf.scene,microscopeGltf.scene,
-      gymmatGltf.scene,easelGltf.scene,rndtableGltf.scene].forEach(calmMaterials);
+      gymmatGltf.scene,easelGltf.scene,rndtableGltf.scene,
+      knifeGltf.scene,screwdriverGltf.scene].forEach(calmMaterials);
     TREE_TEMPLATE=treeGltf.scene;
     DESK_TEMPLATE=deskGltf.scene;
     BLACKBOARD_TEMPLATE=blackboardGltf.scene;
@@ -104,6 +123,8 @@ function preloadCharacterModels(){
     GYMMAT_TEMPLATE=gymmatGltf.scene;
     EASEL_TEMPLATE=easelGltf.scene;
     RNDTABLE_TEMPLATE=rndtableGltf.scene;
+    KNIFE_TEMPLATE=knifeGltf.scene;
+    SCREWDRIVER_TEMPLATE=screwdriverGltf.scene;
     return CHAR_TEMPLATES;
   });
   return CHAR_MODELS_PROMISE;
@@ -192,6 +213,110 @@ function makeRoundTableModel(){
   return normalizeToFloor(inner,0.75);
 }
 
+/* 2026-09-17続報4: 武器の見た目(手持ちモデル)。消火器だけ実体があって
+   他の道具が「アイコンだけ」だったのを解消するため、data.jsのWEAPONS
+   全9種(既存7種+新規のナイフ/ドライバー)それぞれに専用の見た目を用意する。
+   ナイフ/ドライバーは既製3Dモデル(CC0/CC-BY)、他はこのゲームの低ポリな
+   雰囲気に合わせた原始形状の組み合わせで自作。どれも中心が原点になるよう
+   揃えてあり、attachWeaponVisual()側で持ち手の位置に置くだけで済む */
+function makeKnifeWeaponModel(){
+  if(!KNIFE_TEMPLATE) return null;
+  const inner=KNIFE_TEMPLATE.clone(true);
+  return normalizeCentered(inner,0.34);
+}
+function makeScrewdriverWeaponModel(){
+  if(!SCREWDRIVER_TEMPLATE) return null;
+  const inner=SCREWDRIVER_TEMPLATE.clone(true);
+  return normalizeCentered(inner,0.24);
+}
+function makeBookWeaponModel(){
+  const g=new THREE.Group();
+  const cover=new THREE.Mesh(new THREE.BoxGeometry(0.24,0.03,0.17),LM(0x3f5aa0));
+  g.add(cover);
+  const pages=new THREE.Mesh(new THREE.BoxGeometry(0.225,0.022,0.16),LM(0xf0ece0));
+  pages.position.y=0.001; g.add(pages);
+  g.traverse(function(o){ if(o.isMesh) o.castShadow=true; });
+  return g;
+}
+function makeBroomWeaponModel(){
+  const g=new THREE.Group();
+  const stick=new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.018,0.85,6),LM(0x8a6a44));
+  stick.position.y=0.2; g.add(stick);
+  const head=new THREE.Mesh(new THREE.BoxGeometry(0.22,0.28,0.05),LM(0xd9b25a));
+  head.position.y=-0.32; g.add(head);
+  g.traverse(function(o){ if(o.isMesh) o.castShadow=true; });
+  return g;
+}
+function makeMopWeaponModel(){
+  const g=new THREE.Group();
+  const stick=new THREE.Mesh(new THREE.CylinderGeometry(0.018,0.018,0.85,6),LM(0xb0a890));
+  stick.position.y=0.2; g.add(stick);
+  const head=new THREE.Mesh(new THREE.SphereGeometry(0.13,8,6),LM(0xe8e2d0));
+  head.scale.set(1,0.8,1); head.position.y=-0.34; g.add(head);
+  g.traverse(function(o){ if(o.isMesh) o.castShadow=true; });
+  return g;
+}
+function makeConeWeaponModel(){
+  const g=new THREE.Group();
+  const cone=new THREE.Mesh(new THREE.ConeGeometry(0.14,0.36,10),LM(0xe8622a));
+  g.add(cone);
+  const stripe=new THREE.Mesh(new THREE.TorusGeometry(0.08,0.018,6,12),LM(0xf0ece0));
+  stripe.position.y=0.03; stripe.rotation.x=Math.PI/2; g.add(stripe);
+  g.traverse(function(o){ if(o.isMesh) o.castShadow=true; });
+  return g;
+}
+function makeRopeWeaponModel(){
+  const g=new THREE.Group();
+  const coil=new THREE.Mesh(new THREE.TorusGeometry(0.14,0.025,6,16),LM(0xcf3f3f));
+  g.add(coil);
+  [[-0.14,0],[0.14,0]].forEach(function(p){
+    const handle=new THREE.Mesh(new THREE.CylinderGeometry(0.02,0.02,0.16,6),LM(0x3a3a3a));
+    handle.position.set(p[0],0,0); handle.rotation.z=Math.PI/2; g.add(handle);
+  });
+  g.traverse(function(o){ if(o.isMesh) o.castShadow=true; });
+  return g;
+}
+function makeDrumWeaponModel(){
+  const g=new THREE.Group();
+  [-0.05,0.05].forEach(function(x){
+    const stick=new THREE.Mesh(new THREE.CylinderGeometry(0.012,0.012,0.34,6),LM(0xc79a5a));
+    stick.position.set(x,0,0); stick.rotation.z=Math.PI*0.06; g.add(stick);
+  });
+  g.traverse(function(o){ if(o.isMesh) o.castShadow=true; });
+  return g;
+}
+function makeShadowWeaponModel(){
+  // テネブラの「影の手」。実体の道具ではなく暗い爪状のオーラで表現する
+  const g=new THREE.Group();
+  const auraMat=new THREE.MeshBasicMaterial({color:0x2a0a3a,transparent:true,opacity:0.6,depthWrite:false});
+  const aura=new THREE.Mesh(new THREE.SphereGeometry(0.16,8,6),auraMat);
+  g.add(aura);
+  const clawMat=new THREE.MeshBasicMaterial({color:0x120018});
+  [-0.09,0,0.09].forEach(function(x,i){
+    const claw=new THREE.Mesh(new THREE.ConeGeometry(0.022,0.22,5),clawMat);
+    claw.position.set(x,-0.14,0.02*i); claw.rotation.x=Math.PI; g.add(claw);
+  });
+  return g;
+}
+const WEAPON_MODEL_MAKERS={
+  book:makeBookWeaponModel, broom:makeBroomWeaponModel, mop:makeMopWeaponModel,
+  cone:makeConeWeaponModel, rope:makeRopeWeaponModel, drum:makeDrumWeaponModel,
+  knife:makeKnifeWeaponModel, driver:makeScrewdriverWeaponModel, shadow:makeShadowWeaponModel,
+};
+/* 現在選択中の武器の見た目をrig(person()の戻り値)の右手位置に付け替える。
+   ボーン追従ではなく固定オフセット(既存のfaintMark/blindMark等と同じ設計)
+   なので歩行アニメーション中は完全には手に追従しないが、待機/接近時の
+   「何を持っているか一目でわかる」という目的には十分 */
+function attachWeaponVisual(rig,weaponKey){
+  const slot=rig.userData.heldSlot;
+  if(!slot) return;
+  while(slot.children.length) slot.remove(slot.children[0]);
+  const maker=WEAPON_MODEL_MAKERS[weaponKey];
+  if(!maker) return;
+  const model=maker();
+  if(model){ model.rotation.set(0.3,0,0.15); slot.add(model); }
+}
+
 function person(opt){
   if(!CHAR_TEMPLATES){
     throw new Error('preloadCharacterModels()の完了前にperson()が呼ばれた');
@@ -268,9 +393,16 @@ function person(opt){
     new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0.3,depthWrite:false}));
   blob.rotation.x=-Math.PI/2; blob.position.y=0.03; g.add(blob);
 
+  /* 2026-09-17続報4: 手持ち武器の取り付け位置。ボーン追従ではなく右手
+     あたりの固定オフセット(他の目印マークと同じ設計思想)。
+     attachWeaponVisual()がここに現在の武器モデルを差し替える */
+  const heldSlot=new THREE.Group();
+  heldSlot.position.set(0.3,H*0.54,0.14);
+  g.add(heldSlot);
+
   g.userData={mixer:mixer,actions:actions,currentAction:actions.idle||null,
     aura:aura,faintMark:faintMark,bindMark:bindMark,witnessMark:witnessMark,blindMark:blindMark,
-    faint:false,H:H};
+    heldSlot:heldSlot,faint:false,H:H};
   return g;
 }
 

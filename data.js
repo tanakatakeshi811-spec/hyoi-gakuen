@@ -110,6 +110,11 @@ const WEAPONS = [
     desc:'とても静か。ただし相手のすぐ後ろまで近づく必要がある。拘束にも使える。', pickup:{room:'gym'}},
   {key:'drum',  name:'太鼓のバチ',   icon:'🥢', power:0.75, time:1.6, noise:0.3, range:1.7, threatBonus:6,
     desc:'音楽室の備品。連打が軽快で扱いやすい。', pickup:{room:'music'}},
+  {key:'knife', name:'カッターナイフ', icon:'🔪', power:0.95, time:1.1, noise:0.1, range:1.0, threatBonus:10,
+    desc:'理科室の実験用具入れにあった。切れ味がよく静かで一瞬で片がつくが、'
+      +'相手のすぐそばまで近づかないと届かない諸刃の剣。', pickup:{room:'science'}},
+  {key:'driver',name:'ドライバー',   icon:'🔧', power:0.85, time:1.5, noise:0.45, range:1.3, threatBonus:9,
+    desc:'旧倉庫の工具箱にあった。頑丈で扱いやすいが、金属がぶつかる音が響きやすい。'},
   {key:'shadow',name:'影の手',       icon:'🖤', power:1.0, time:0.9, noise:0.0, range:3.2, threatBonus:14,
     desc:'テネブラの力。人間には聞こえないが、姿を見られると必ず「怪異」として大騒ぎになる。',
     needPossession:60, supernatural:true},

@@ -344,14 +344,25 @@ function addMarker(x,z,color,shape){
   return m;
 }
 function buildProps(){
+  /* 武器ごとにマーカーの色を変え、道具の種類が遠目でも見分けやすいようにする
+     (以前は全武器が同じ水色シリンダーで見分けがつかなかった) */
+  const WEAPON_MARKER_COLOR={book:0x8fa8e0,broom:0xd9b25a,mop:0xe8e2d0,cone:0xe8622a,
+    rope:0xcf3f3f,drum:0xc79a5a,knife:0xb0d8e8,driver:0x9fb0c0,shadow:0x5a1fae};
   WEAPONS.forEach(function(w){
     if(!w.pickup) return;
     const c=roomCenter(w.pickup.room);
     const ox=(Math.random()*4-2), oz=(Math.random()*4-2);
     const x=c.x+ox, z=c.z+oz+3;
-    const marker=addMarker(x,z,0x66ccff,'cyl');
+    const marker=addMarker(x,z,WEAPON_MARKER_COLOR[w.key]||0x66ccff,'cyl');
     PROPS.push({type:'weapon',key:w.key,x:x,z:z,marker:marker,label:w.name+'を持つ'});
   });
+  /* ドライバーは「旧倉庫の工具箱」という設定のため、他の武器と違い
+     roomCenter経由ではなくSHEDのすぐ外に個別配置する */
+  {
+    const dx=SHED.x-3, dz=SHED.z-SHED.d/2-1.6;
+    const marker=addMarker(dx,dz,WEAPON_MARKER_COLOR.driver,'cyl');
+    PROPS.push({type:'weapon',key:'driver',x:dx,z:dz,marker:marker,label:'ドライバーを持つ'});
+  }
   GIFTS.forEach(function(gf){
     let c;
     if(gf.pickup.room) c=roomCenter(gf.pickup.room);
@@ -593,6 +604,7 @@ function initPlayerObj(){
     hair:0x241a2e, skin:0xf0d3b4, uniform:0x2b2140, accent:0x7a3ffb, eye:0x3a2a52});
   playerObj.position.set(player.x,0,player.z);
   scene.add(playerObj);
+  attachWeaponVisual(playerObj,player.selectedWeapon);
 }
 
 /* ---------------- NPC ---------------- */
@@ -924,7 +936,11 @@ function updateTakedown(dt){
 }
 function finishTakedown(npc,w){
   const seen=witnessesAt(npc.x,npc.z,npc.key);
-  npc.faint=true; npc.faintT=40;
+  npc.faint=true;
+  /* 2026-09-17続報4: 道具のpower(威力)を実際に反映。今まで定義だけあって
+     使われていなかった(気絶時間は一律40秒固定)。威力が高い道具ほど
+     長く気絶し、運び出す猶予が増える */
+  npc.faintT=26+(w.power||0.6)*22;
   npc.rig.userData.faint=true;
   npc.rig.userData.faintMark.visible=true;
   npc.rig.rotation.z=Math.PI/2;
@@ -937,6 +953,18 @@ function finishTakedown(npc,w){
     gainSuspicion(35*seen.length,'気絶させる瞬間を見られてしまった……!!');
   } else {
     gainSuspicion(2);
+  }
+  /* 2026-09-17続報4: 道具のnoise(音の出やすさ)を実際に反映。今まで定義
+     だけあって使われていなかった。直接目撃されなくても、音が響きやすい
+     道具ほど周囲のNPCが「聞きつけて」疑いの目を少し上げる(無音の影の手は
+     対象外、ナイフ/縄跳びのようなnoiseが低い道具はほぼ発生しない) */
+  if(!w.supernatural && w.noise>0){
+    const hearRadius=w.noise*11;
+    const heard=npcs.filter(function(n){
+      return n.key!==npc.key && !n.faint && !n.captive && !n.transferred &&
+        seen.indexOf(n)<0 && Math.hypot(n.x-npc.x,n.z-npc.z)<=hearRadius;
+    });
+    if(heard.length) gainSuspicion(8*w.noise*heard.length,'物音を聞きつけられたかもしれない……');
   }
 }
 
@@ -1019,6 +1047,7 @@ function actionPickupWeapon(key){
   player.weapons[key]=true;
   const w=WEAPONS.find(function(x){ return x.key===key; });
   player.selectedWeapon=key;
+  attachWeaponVisual(playerObj,key);
   toast('『'+w.name+'』を手に入れた。');
   buildWeaponBar();
 }
@@ -1210,7 +1239,7 @@ function buildWeaponBar(){
     const b=document.createElement('button');
     b.className='wbtn'+(player.selectedWeapon===w.key?' sel':'');
     b.textContent=w.icon; b.title=w.name+' - '+w.desc;
-    b.onclick=function(){ player.selectedWeapon=w.key; buildWeaponBar(); };
+    b.onclick=function(){ player.selectedWeapon=w.key; attachWeaponVisual(playerObj,w.key); buildWeaponBar(); };
     bar.appendChild(b);
   });
 }
