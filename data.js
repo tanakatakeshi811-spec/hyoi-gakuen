@@ -50,6 +50,22 @@ const SHED = {x:236, z:260, w:16, d:14};
 const STAIRS_UP   = {x: (24.5)*TILE, z: 3*TILE};
 const STAIRS_DOWN = {x: ROOF_OFFSET.x+8, z: ROOF_OFFSET.z+40};
 
+/* ---- 2階・3階(しゅんりさん要望「校舎をもう少し広く3階建てに」)。
+   壁・床のグリッド衝突判定(blocked())の複雑化を避けるため、既存の
+   屋上と全く同じ設計パターン(校舎本体から遠く離れた場所に独立した
+   小さな建物を置き、階段プロップでワープする)を踏襲する。ROOF_ZONEとは
+   別のOBSTACLES登録範囲になるようx方向に十分離して配置してある ---- */
+const FLOOR2_OFFSET = {x:1100, z:0};
+const FLOOR2_ZONE = {x0:FLOOR2_OFFSET.x-4, z0:FLOOR2_OFFSET.z-4, x1:FLOOR2_OFFSET.x+52, z1:FLOOR2_OFFSET.z+28};
+const FLOOR3_OFFSET = {x:1200, z:0};
+const FLOOR3_ZONE = {x0:FLOOR3_OFFSET.x-4, z0:FLOOR3_OFFSET.z-4, x1:FLOOR3_OFFSET.x+52, z1:FLOOR3_OFFSET.z+28};
+/* 1階⇔2階⇔3階 の階段対応地点(1階側の乗り場は既存の屋上階段=STAIRS_UPとは
+   別の、廊下の少し静かな場所に新設する) */
+const STAIRS_2F_UP   = {x: 25.5*TILE, z: 8*TILE};
+const STAIRS_2F_DOWN = {x: FLOOR2_OFFSET.x+6,  z: FLOOR2_OFFSET.z+18};
+const STAIRS_3F_UP   = {x: FLOOR2_OFFSET.x+6,  z: FLOOR2_OFFSET.z+6};
+const STAIRS_3F_DOWN = {x: FLOOR3_OFFSET.x+6,  z: FLOOR3_OFFSET.z+18};
+
 /* ---- NPC簡易経路探索用: 各部屋の出入口(ドア)座標 ---- */
 const DOOR_PT = {
   homeroom:{x:26,z:46}, classB:{x:62,z:46}, class2a:{x:130,z:46}, library:{x:166,z:46},
@@ -74,6 +90,12 @@ function roomNameAt(x,z){
     return '中庭';
   }
   if(x>=ROOF_ZONE.x0&&x<=ROOF_ZONE.x1&&z>=ROOF_ZONE.z0&&z<=ROOF_ZONE.z1) return '屋上';
+  if(x>=FLOOR2_ZONE.x0&&x<=FLOOR2_ZONE.x1&&z>=FLOOR2_ZONE.z0&&z<=FLOOR2_ZONE.z1){
+    return (x<FLOOR2_OFFSET.x+24) ? '2階 廊下' : '2年C組(2階)';
+  }
+  if(x>=FLOOR3_ZONE.x0&&x<=FLOOR3_ZONE.x1&&z>=FLOOR3_ZONE.z0&&z<=FLOOR3_ZONE.z1){
+    return (x<FLOOR3_OFFSET.x+24) ? '3階 廊下' : '資料室(3階)';
+  }
   return '校内';
 }
 
