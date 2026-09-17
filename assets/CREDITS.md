@@ -51,6 +51,24 @@ CC0のものは著作権表示が法的には不要ですが、制作者への�
 トーラス)を組み合わせて自作しています。武器の見た目はキャラクターの
 右手あたりに固定オフセットで取り付ける方式(ボーン追従ではない)です。
 
+## テクスチャ(壁・床・天井)
+
+| ファイル | 用途 | 素材名 | 配布元 | ライセンス |
+|---|---|---|---|---|
+| `textures/wall_interior.jpg` | 校舎の内壁(教室・廊下) | White Plaster 02 | [polyhaven.com/a/white_plaster_02](https://polyhaven.com/a/white_plaster_02) | CC0 |
+| `textures/wall_exterior.jpg` | 校舎の外壁 | Beige Wall 001 | [polyhaven.com/a/beige_wall_001](https://polyhaven.com/a/beige_wall_001) | CC0 |
+| `textures/floor_classroom.jpg` | 教室の床(1年A組/1年B組/2年A組/2年C組) | Laminate Floor | [polyhaven.com/a/laminate_floor](https://polyhaven.com/a/laminate_floor) | CC0 |
+| `textures/floor_corridor.jpg` | 廊下・昇降口の床 | Old Linoleum Flooring 01 | [polyhaven.com/a/old_linoleum_flooring_01](https://polyhaven.com/a/old_linoleum_flooring_01) | CC0 |
+| `textures/floor_gym.jpg` | 体育館の床 | Diagonal Parquet | [polyhaven.com/a/diagonal_parquet](https://polyhaven.com/a/diagonal_parquet) | CC0 |
+| `textures/floor_generic.jpg` | それ以外の特別教室(保健室・理科室・音楽室・美術部室・生徒会室・図書室・資料室) | Floor Tiles 06 | [polyhaven.com/a/floor_tiles_06](https://polyhaven.com/a/floor_tiles_06) | CC0 |
+| `textures/ceiling.jpg` | 全室共通の天井/屋根裏 | Ceiling Interior | [polyhaven.com/a/ceiling_interior](https://polyhaven.com/a/ceiling_interior) | CC0 |
+
+Poly Haven(https://polyhaven.com/)のテクスチャは全てCC0(クレジット表記は
+法的には不要)。three.jsの`TextureLoader`で読み込み、`RepeatWrapping`+
+`repeat`でタイル貼りして間延びを防いでいます。用途(教室/廊下/体育館/
+特別教室/内壁/外壁)ごとに別のテクスチャを割り当て、全部同じ使い回しには
+していません。
+
 ## ライセンス補足
 
 - CC0(Creative Commons Zero)のモデルは個人・商用問わず自由に利用・改変・
