@@ -340,14 +340,35 @@ const WEAPON_SWING={
   shadow:{style:'arc',   windup:0.35, amp:1.6},
 };
 function easeOutQuad(x){ x=Math.max(0,Math.min(1,x)); return 1-(1-x)*(1-x); }
+/* 2026-09-18: 「刺すモーションをもっとちゃんと作ってほしい」対応。
+   従来は 溜め(windup)→振り/突き(strike) の2フェーズで、strikeが進捗1.0に
+   達した直後にtakedownそのものが終了してresetWeaponPose()が呼ばれるため、
+   「当たった瞬間の一拍の静止」が画面上ほぼ発生しなかった。ここでは
+   w.time/needなど既存の所要時間・成否ロジックは一切変えずに、進捗(t)の
+   使い方だけ3フェーズへ拡張する:
+     ①溜め(0〜windup): 従来通り
+     ②振り/突き(windup〜strikeEnd): 従来のstrikeカーブを前倒しで完了させる
+     ③残心(strikeEnd〜1.0): 「刺した/振り終えた」ポーズを一瞬保持しつつ、
+        バネのようにわずかに戻ってから収まる小さな余韻(settle)を加える
+   これにより同じ所要時間の中で「予備動作→踏み込み→一瞬の静止」という
+   自然な流れが生まれる */
 function applyWeaponSwingPose(rig,weaponKey,t){
   const slot=rig.userData.heldSlot;
   if(!slot) return;
   const p=WEAPON_SWING[weaponKey]||WEAPON_SWING.book;
   const tt=Math.max(0,Math.min(1,t));
-  const wu=Math.max(0.001,p.windup);
+  const wu=Math.max(0.001,Math.min(0.85,p.windup));
+  const strikeEnd=wu+(1-wu)*0.8; // 残りの8割で振り切り、最後の2割を「残心」に充てる
   const raise=Math.sin(Math.min(1,tt/wu)*Math.PI/2); // 0→1(構え/溜め)
-  const strike=easeOutQuad(Math.max(0,(tt-p.windup)/Math.max(0.001,1-p.windup))); // 0→1(振り/突き)
+  const strikeRaw = tt<=strikeEnd
+    ? easeOutQuad((tt-wu)/Math.max(0.001,strikeEnd-wu)) // 0→1(振り/突き)
+    : 1;
+  let settle=0;
+  if(tt>strikeEnd && p.style!=='flurry'){
+    const st=(tt-strikeEnd)/Math.max(0.001,1-strikeEnd); // 0→1(残心フェーズ内の進捗)
+    settle=Math.sin(st*Math.PI)*0.14; // 0→山→0、当たった直後にわずかに戻って収まる余韻
+  }
+  const strike=strikeRaw-settle;
   let dx=0,dy=0,dz=0,rx=0,ry=0,rz=0,lean=0;
   if(p.style==='thrust'){
     dz = -0.12*raise*p.amp + 0.46*p.amp*strike;
