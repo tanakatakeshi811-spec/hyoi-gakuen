@@ -167,6 +167,14 @@ const LOVE_POTION = {
     +'見られると怪しまれてしまうかもしれない。'
 };
 
+/* ---- 2026-09-18: ハグ/キス(しゅんりさん要望「キスとかハグもできるように」)。
+   「一緒に過ごす」「告白する」と同じ並びの親愛アクション。過度に生々しい
+   描写は避け、テキスト演出+好感度アップ程度のライトな表現に留める。
+   1日1回までのクールダウン(player.flags.huggedToday/kissedTodayでnextDay()
+   ごとにリセット)+好感度のしきい値で「常識的な発生条件」を表現する ---- */
+const HUG_AFF_MIN=35, HUG_GAIN=10;
+const KISS_AFF_MIN=75, KISS_GAIN=18;
+
 /* ---- 贈り物(好感度アップ用アイテム。マップ上で採取/購入) ---- */
 const GIFTS = [
   {key:'flower', name:'中庭の花',   icon:'🌸', value:6,  pickup:{zone:'courtyard'}},

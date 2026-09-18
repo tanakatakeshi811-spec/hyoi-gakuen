@@ -808,13 +808,14 @@ function newPlayer(gender,name){
   return {
     name:name||'鴉羽 ツナグ', male:gender==='boy',
     x:100, z:106, yaw:Math.PI, sneak:false, carrying:false, captiveKey:null,
-    selectedWeapon:'book', weapons:{book:true}, extinguisher:0, trashbag:0, potion:0,
+    selectedWeapon:'book', weapons:{book:true}, extinguisher:0, trashbagUnlocked:false, potion:0,
     affection:0, possession:0, suspicion:0, trust:50,
     grades:{国語:40,数学:40,理科:40,社会:40,英語:40,体育:40},
     testScores:{},
     gifts:{},
     day:1, timeMin:DAY_START, periodIdx:0,
-    flags:{talkedToday:{}, truancy:0, roofKey:false, giftPicked:{}, confessFailed:0},
+    flags:{talkedToday:{}, truancy:0, roofKey:false, giftPicked:{}, confessFailed:0,
+      huggedToday:false, kissedToday:false},
   };
 }
 let rivalBond=20;
@@ -1210,6 +1211,32 @@ function actionHangout(npc){
   updateMeters();
 }
 
+/* 2026-09-18: ハグ/キス。「一緒に過ごす」と同じく昼休み・放課後限定、
+   1日1回まで。過度な描写は避けテキスト演出+好感度アップのみ */
+function actionHug(npc){
+  const per=PERIODS[player.periodIdx];
+  if(per.type!=='lunch'&&per.type!=='after'){ toast('今は落ち着いて過ごせる時間じゃない。'); return; }
+  if(player.affection<HUG_AFF_MIN){ toast('もう少し仲を深めてからにしよう。'); return; }
+  if(player.flags.huggedToday){ toast('今日はもう十分ハグした……照れくさい。'); return; }
+  player.flags.huggedToday=true;
+  player.affection=clamp(player.affection+HUG_GAIN,0,100);
+  trustDelta(1);
+  toast('そっと抱きしめた……陽向の体温が伝わってくる（好感度+'+HUG_GAIN+'）');
+  updateMeters();
+  refreshActionMenu();
+}
+function actionKiss(npc){
+  const per=PERIODS[player.periodIdx];
+  if(per.type!=='after'){ toast('放課後、人目のない時にしよう。'); return; }
+  if(player.affection<KISS_AFF_MIN){ toast('もう少し仲を深めてからにしよう。'); return; }
+  if(player.flags.kissedToday){ toast('今日はもう……（また明日にしよう）'); return; }
+  player.flags.kissedToday=true;
+  player.affection=clamp(player.affection+KISS_GAIN,0,100);
+  trustDelta(2);
+  toast('そっと唇を重ねた……時間が止まったような一瞬だった（好感度+'+KISS_GAIN+'）');
+  updateMeters();
+  refreshActionMenu();
+}
 function actionConfess(npc){
   const per=PERIODS[player.periodIdx];
   if(per.type!=='after'){ toast('放課後でないと落ち着いて話せない。'); return; }
@@ -1415,9 +1442,8 @@ function actionRelease(npc){
    手段との整合性が崩れるので、包んでいる瞬間だけは既存の目撃システムを
    流用し、見られていれば相応の疑いの目は上がる */
 function actionBagWrap(npc){
-  if((player.trashbag||0)<=0){ toast('ビニール袋を持っていない。'); return; }
+  if(!player.trashbagUnlocked){ toast('ビニール袋を持っていない。'); return; }
   if(!npc.faint){ toast('気絶させてからでないと使えない。'); return; }
-  player.trashbag--;
   npc.faint=false; npc.rig.userData.faint=false; npc.rig.userData.faintMark.visible=false;
   npc.witness=0;
   npc.bagged=true;
@@ -1435,6 +1461,32 @@ function actionBagWrap(npc){
 
 /* ---------------- 旧倉庫の発覚リスク(拘束中の相手がいる間、誰かが倉庫に
    近づき続けると「発覚」BADエンドに繋がる) ---------------- */
+/* 2026-09-18: 武器を手に持った状態でNPCの視界に入ると怪しまれる
+   (しゅんりさん要望「武器を手に持ってると怪しまれたりして」)。教科書
+   (book)は普段から持ち歩く道具として自然なので対象外、それ以外の武器
+   (影の手を含む)は選択中に誰かに見られると一定間隔で疑いの目が上がる。
+   毎フレーム判定すると見られ続けている間ずっと加算されてしまうため、
+   既存のtakedown.spottedと同様「一定クールダウンを置いて散発的に発生
+   させる」方式にした */
+let weaponWitnessCooldown=0;
+const WEAPON_WITNESS_COOLDOWN_SEC=6;
+function checkWeaponWitness(dt){
+  weaponWitnessCooldown=Math.max(0,weaponWitnessCooldown-dt);
+  if(player.carrying||takedown) return; // 運搬中/構え中は別ロジックで既に判定済み
+  const w=currentWeapon();
+  if(!w||w.key==='book') return;
+  if(weaponWitnessCooldown>0) return;
+  const seen=witnessesAt(playerObj.position.x,playerObj.position.z,null);
+  if(!seen.length) return;
+  weaponWitnessCooldown=WEAPON_WITNESS_COOLDOWN_SEC;
+  seen.forEach(function(n){ n.witness=Math.max(n.witness,1); });
+  const amount=6+(w.threatBonus||4)*0.7*seen.length;
+  if(w.supernatural){
+    gainSuspicion(amount,'影の手を見られた……!! 「怪異だ」という騒ぎに!');
+  } else {
+    gainSuspicion(amount,seen[0].name+'に、'+w.icon+w.name+'を持っているところを見られた……!');
+  }
+}
 let shedDangerT=0, shedWarned=false;
 function checkShedExposure(dt){
   const activeCaptives=Object.keys(captives).filter(function(k){ return captives[k]; });
@@ -1498,17 +1550,38 @@ function actionRoofKey(){
   player.flags.roofKey=true;
   toast('引き出しの奥に『屋上の鍵』を見つけた。');
 }
+/* 2026-09-18: 消火器の仕様変更(しゅんりさん要望「10秒で1個分回復する、
+   その持ってる数まで」)。拾うたびに上限(extinguisherMax)と所持数
+   (extinguisher)を両方+1し、使って減った所持数は時間経過(10秒/1個、
+   updateExtinguisherRegen参照)で上限まで自動的に回復する仕組みに変更 */
 function actionPickupExtinguisher(propRef){
+  player.extinguisherMax=(player.extinguisherMax||0)+1;
   player.extinguisher=(player.extinguisher||0)+1;
-  toast('『'+EXTINGUISHER.name+'』を手に入れた(所持数 '+player.extinguisher+')');
+  toast('『'+EXTINGUISHER.name+'』を手に入れた(所持上限 '+player.extinguisherMax+'本、10秒ごとに自動で1本回復する)');
   if(propRef){ propRef.marker.visible=false; propRef.cooldown=90; }
 }
-/* 2026-09-17続報7: ビニール袋(黒)の拾得。専用の部屋が無いため、既存の
-   「購買のお菓子」と同じ購買部エリア(昇降口)と、予備で廊下に配置 */
+/* 2026-09-18: ビニール袋(黒)は「1回入手したら個数無制限」に変更
+   (しゅんりさん要望)。所持数カウントは廃止し、player.trashbagUnlockedの
+   真偽フラグだけで管理する */
 function actionPickupTrashbag(propRef){
-  player.trashbag=(player.trashbag||0)+1;
-  toast('『'+TRASHBAG.name+'』を手に入れた(所持数 '+player.trashbag+')');
+  if(!player.trashbagUnlocked){
+    player.trashbagUnlocked=true;
+    toast('『'+TRASHBAG.name+'』を手に入れた。以後、何度でも自由に使える。');
+  } else {
+    toast('『'+TRASHBAG.name+'』はもう持っている(使い放題)。');
+  }
   if(propRef){ propRef.marker.visible=false; propRef.cooldown=90; }
+}
+let extinguisherRegenT=0;
+const EXTINGUISHER_REGEN_SEC=10;
+function updateExtinguisherRegen(dt){
+  const max=player.extinguisherMax||0;
+  if(max<=0 || (player.extinguisher||0)>=max){ extinguisherRegenT=0; return; }
+  extinguisherRegenT+=dt;
+  if(extinguisherRegenT>=EXTINGUISHER_REGEN_SEC){
+    extinguisherRegenT-=EXTINGUISHER_REGEN_SEC;
+    player.extinguisher=Math.min(max,(player.extinguisher||0)+1);
+  }
 }
 /* 2026-09-17続報7: 惚れ薬。「理科室で何個でも作れる」というしゅんりさんの
    指定通り、消費素材も回数制限も設けない(既存のクールダウン制ピックアップ
@@ -1619,6 +1692,8 @@ function nextDay(){
   }
   player.timeMin=DAY_START; player.periodIdx=0;
   player.flags.talkedToday={};
+  player.flags.huggedToday=false;
+  player.flags.kissedToday=false;
   player.testScores={};
   dayInfo.isTestDay = (player.day%4===0);
   if(dayInfo.isTestDay) toast('📢 今日は複数教科のテストがある日だ……');
@@ -1760,23 +1835,50 @@ function buildActionsFor(target){
     const acts=[{label:'話す',onClick:function(){ actionTalk(npc); }}];
     if(npc.faint && !player.carrying){
       acts.push({label:'運ぶ',sub:'旧倉庫まで連れて行く',onClick:function(){ actionCarry(npc); }});
-      acts.push({label:TRASHBAG.icon+' 袋に包んで放置する',sub:'所持:'+(player.trashbag||0)+'枚／その場で処理完了・発覚リスクなし',
-        disabled:(player.trashbag||0)<=0,onClick:function(){ actionBagWrap(npc); }});
+      acts.push({label:TRASHBAG.icon+' 袋に包んで放置する',sub:player.trashbagUnlocked?'使い放題／その場で処理完了・発覚リスクなし':'ビニール袋を持っていない',
+        disabled:!player.trashbagUnlocked,onClick:function(){ actionBagWrap(npc); }});
       return acts;
     }
     if(npc.blinded){
       acts.push({label:'（消火器で視界を奪って足止め中……）',sub:'約'+Math.ceil(npc.blindT)+'秒',disabled:true,onClick:function(){}});
     } else {
-      acts.push({label:EXTINGUISHER.icon+' 消火器を吹きかける',sub:'所持:'+(player.extinguisher||0)+'本／正面からでも可・気絶はしない',
+      acts.push({label:EXTINGUISHER.icon+' 消火器を吹きかける',
+        sub:'所持:'+(player.extinguisher||0)+'/'+(player.extinguisherMax||0)+'本(10秒で1本回復)／正面からでも可・気絶はしない',
         disabled:(player.extinguisher||0)<=0,onClick:function(){ actionSpray(npc); }});
     }
     if(npc.key==='hinata'&&!npc.faint){
       acts.push({label:'贈り物を渡す',sub:giftSubLabel(),disabled:totalGifts()===0,
         onClick:function(){ openGiftChoice(npc); }});
       if(per.type==='lunch'||per.type==='after') acts.push({label:'一緒に過ごす',onClick:function(){ actionHangout(npc); }});
+      /* 2026-09-18: ハグ/キスを新設。「一緒に過ごす」「告白する」と同じ並び。
+         条件を満たすまではボタンごと隠さず、理由付きの無効ボタンとして
+         表示する(2026-09-18の「告白のタイミングが分かりにくい」対応と
+         同じ方針=見えないと機能自体に気づけないため) */
+      (function(){
+        let reason=null;
+        if(per.type!=='lunch'&&per.type!=='after') reason='昼休みか放課後にしよう';
+        else if(player.affection<HUG_AFF_MIN) reason='好感度が'+HUG_AFF_MIN+'以上必要(今:'+Math.round(player.affection)+')';
+        else if(player.flags.huggedToday) reason='今日はもう十分ハグした';
+        acts.push({label:'🤗 ハグする',sub:reason||'好感度+'+HUG_GAIN,disabled:!!reason,onClick:function(){ actionHug(npc); }});
+      })();
       acts.push({label:LOVE_POTION.icon+' 惚れ薬を使う',sub:'所持:'+(player.potion||0)+'個／好感度が大きく上がる',
         disabled:(player.potion||0)<=0,onClick:function(){ actionUsePotion(npc); }});
-      if(per.type==='after'&&player.affection>=60) acts.push({label:'告白する',onClick:function(){ actionConfess(npc); }});
+      (function(){
+        let reason=null;
+        if(per.type!=='after') reason='放課後にしか出来ない';
+        else if(player.affection<KISS_AFF_MIN) reason='好感度が'+KISS_AFF_MIN+'以上必要(今:'+Math.round(player.affection)+')';
+        else if(player.flags.kissedToday) reason='今日はもう……(また明日)';
+        acts.push({label:'💋 キスする',sub:reason||'好感度+'+KISS_GAIN,disabled:!!reason,onClick:function(){ actionKiss(npc); }});
+      })();
+      /* 2026-09-18: 告白ボタンも同じ方針で常時表示+理由付き無効化に変更
+         (旧仕様は条件を満たすまでボタン自体が出ず「機能があること自体」
+         に気づきにくかった) */
+      (function(){
+        let reason=null;
+        if(per.type!=='after') reason='放課後にしか言えない';
+        else if(player.affection<60) reason='好感度が60以上必要(今:'+Math.round(player.affection)+')';
+        acts.push({label:'告白する',sub:reason||'想いを伝える',disabled:!!reason,onClick:function(){ actionConfess(npc); }});
+      })();
     }
     const eliminable=(npc.role==='student'||npc.role==='rival')&&npc.key!=='hinata';
     if(eliminable){
@@ -2142,6 +2244,8 @@ function animate(){
     npcs.forEach(function(n,i){ updateNPC(n,dt,i); });
     updateTakedown(dt);
     checkShedExposure(dt);
+    updateExtinguisherRegen(dt);
+    checkWeaponWitness(dt);
     tickTime(dt);
     PROPS.forEach(function(p){
       if(p.cooldown){ p.cooldown-=dt; if(p.cooldown<=0){ p.cooldown=0; if(p.marker) p.marker.visible=true; } }
@@ -2190,6 +2294,10 @@ async function boot(useContinue){
     if(hinanoState.transferred){ const n=npcByKey('hinano'); if(n) n.transferred=true; }
     if(hinanoState.scared){ const n=npcByKey('hinano'); if(n) n.scared=true; }
     Object.keys(captives).forEach(function(k){ if(captives[k]){ const n=npcByKey(k); if(n) n.captive=true; } });
+    /* 旧セーブ互換: extinguisherMax/trashbagUnlockedが無い古いセーブを
+       読み込んだ時に矛盾が出ないようフォールバック */
+    player.extinguisherMax=Math.max(player.extinguisherMax||0,player.extinguisher||0);
+    if(player.trashbagUnlocked===undefined) player.trashbagUnlocked=(player.trashbag||0)>0;
   }
   initPlayerObj();
   buildWeaponBar();
