@@ -78,6 +78,15 @@ function roomKeyAt(x,z){
   return null;
 }
 
+/* ---- 現在の階数だけを座標から引く(HUDに常時表示するため2026-09-18新設。
+   しゅんりさん要望「2階3階行く方法がちょっと分からなくて」への対応の一部) ---- */
+function floorAt(x,z){
+  if(x>=FLOOR3_ZONE.x0&&x<=FLOOR3_ZONE.x1&&z>=FLOOR3_ZONE.z0&&z<=FLOOR3_ZONE.z1) return '3F';
+  if(x>=FLOOR2_ZONE.x0&&x<=FLOOR2_ZONE.x1&&z>=FLOOR2_ZONE.z0&&z<=FLOOR2_ZONE.z1) return '2F';
+  if(x>=ROOF_ZONE.x0&&x<=ROOF_ZONE.x1&&z>=ROOF_ZONE.z0&&z<=ROOF_ZONE.z1) return '屋上';
+  if(x>=OUTDOOR_ZONE.x0&&x<=OUTDOOR_ZONE.x1&&z>=OUTDOOR_ZONE.z0&&z<=OUTDOOR_ZONE.z1) return '屋外';
+  return '1F';
+}
 /* ---- 部屋名を座標から引く ---- */
 function roomNameAt(x,z){
   const c=Math.floor(x/TILE), r=Math.floor(z/TILE);

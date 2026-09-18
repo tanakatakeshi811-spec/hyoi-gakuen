@@ -532,6 +532,21 @@ function updateCameraFov(){
 function layoutMobileHUD(){}
 
 /* ---------------- 小物(インタラクト可能プロップ) ---------------- */
+/* 2026-09-18: 階段の視認性改善(しゅんりさん要望「2階3階行く方法が
+   ちょっと分からなくて」への対応)。既存addMarker()の水色シリンダー
+   (半径0.4/高さ1.1)は他の備品マーカーと見分けがつきにくかったため、
+   階段専用に一回り大きい柱+行き先が書かれたラベルスプライトをセットで
+   立てる。3D空間上の遠目からでも「あそこに何かある」と気づきやすくする */
+function addStairSignage(x,z,color,text){
+  const m=new THREE.Mesh(new THREE.CylinderGeometry(0.55,0.55,2.2,14),
+    new THREE.MeshBasicMaterial({color:color}));
+  m.position.set(x,1.2,z);
+  scene.add(m);
+  const spr=makeLabelSprite(text,11);
+  spr.position.set(x,2.9,z);
+  scene.add(spr);
+  return m;
+}
 function addMarker(x,z,color,shape){
   let m;
   if(shape==='box') m=new THREE.Mesh(new THREE.BoxGeometry(0.7,0.7,0.7),new THREE.MeshBasicMaterial({color:color}));
@@ -588,19 +603,21 @@ function buildProps(){
   PROPS.push({type:'shrine',x:shr.x,z:shr.z+1.6,label:'お参りする(憑依度が少し下がる)'});
 
   PROPS.push({type:'stairsUp',x:STAIRS_UP.x,z:STAIRS_UP.z,label:'屋上へ向かう'});
-  addMarker(STAIRS_UP.x,STAIRS_UP.z,0xbfa6ff,'cyl');
+  addStairSignage(STAIRS_UP.x,STAIRS_UP.z,0xbfa6ff,'⬆ 屋上へ(鍵が必要)');
   PROPS.push({type:'stairsDown',x:STAIRS_DOWN.x,z:STAIRS_DOWN.z,label:'校舎へ戻る'});
-  addMarker(STAIRS_DOWN.x,STAIRS_DOWN.z,0xbfa6ff,'cyl');
+  addStairSignage(STAIRS_DOWN.x,STAIRS_DOWN.z,0xbfa6ff,'⬇ 1階へ戻る');
 
-  /* 2026-09-17続報8: 3階建て化。1階⇔2階⇔3階の階段(鍵は不要、屋上とは別系統) */
+  /* 2026-09-17続報8: 3階建て化。1階⇔2階⇔3階の階段(鍵は不要、屋上とは別系統)
+     2026-09-18: 見つけにくいという指摘を受け、addMarker()より目立つ
+     addStairSignage()(大きい柱+行き先ラベル)に変更 */
   PROPS.push({type:'stairs2up',x:STAIRS_2F_UP.x,z:STAIRS_2F_UP.z,label:'2階へ上がる'});
-  addMarker(STAIRS_2F_UP.x,STAIRS_2F_UP.z,0x8fd6ff,'cyl');
+  addStairSignage(STAIRS_2F_UP.x,STAIRS_2F_UP.z,0x8fd6ff,'⬆ 2階へ');
   PROPS.push({type:'stairs2down',x:STAIRS_2F_DOWN.x,z:STAIRS_2F_DOWN.z,label:'1階へ下りる'});
-  addMarker(STAIRS_2F_DOWN.x,STAIRS_2F_DOWN.z,0x8fd6ff,'cyl');
+  addStairSignage(STAIRS_2F_DOWN.x,STAIRS_2F_DOWN.z,0x8fd6ff,'⬇ 1階へ');
   PROPS.push({type:'stairs3up',x:STAIRS_3F_UP.x,z:STAIRS_3F_UP.z,label:'3階へ上がる'});
-  addMarker(STAIRS_3F_UP.x,STAIRS_3F_UP.z,0x8fd6ff,'cyl');
+  addStairSignage(STAIRS_3F_UP.x,STAIRS_3F_UP.z,0xffd68f,'⬆ 3階へ');
   PROPS.push({type:'stairs3down',x:STAIRS_3F_DOWN.x,z:STAIRS_3F_DOWN.z,label:'2階へ下りる'});
-  addMarker(STAIRS_3F_DOWN.x,STAIRS_3F_DOWN.z,0x8fd6ff,'cyl');
+  addStairSignage(STAIRS_3F_DOWN.x,STAIRS_3F_DOWN.z,0xffd68f,'⬇ 2階へ');
 
   PROPS.push({type:'shed',x:SHED.x,z:SHED.z+SHED.d/2+1.5,label:'旧倉庫'});
 
@@ -1766,7 +1783,8 @@ function updateMeters(){
   document.getElementById('dayNum').textContent=player.day;
   document.getElementById('clockTxt').textContent=minToClock(player.timeMin);
   document.getElementById('periodTxt').textContent=PERIODS[player.periodIdx]?PERIODS[player.periodIdx].name:'';
-  document.getElementById('roomlabel').textContent='現在地: '+roomNameAt(playerObj.position.x,playerObj.position.z);
+  document.getElementById('floorBadge').textContent=floorAt(playerObj.position.x,playerObj.position.z);
+  document.getElementById('roomlabelTxt').textContent='現在地: '+roomNameAt(playerObj.position.x,playerObj.position.z);
   document.getElementById('sleepbtn').style.display=(PERIODS[player.periodIdx]&&PERIODS[player.periodIdx].type==='after')?'block':'none';
   const nearRoof=Math.hypot(playerObj.position.x-STAIRS_UP.x,playerObj.position.z-STAIRS_UP.z)<3;
   const nearRoofDown=Math.hypot(playerObj.position.x-STAIRS_DOWN.x,playerObj.position.z-STAIRS_DOWN.z)<3;

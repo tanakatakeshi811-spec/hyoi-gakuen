@@ -33,6 +33,8 @@
     操作: WASD/矢印で移動、マウスドラッグで視点回転、Eで調べる/話す、Qでしゃがみ(隠密)、Shiftでダッシュ。
     スマホは画面左半分をドラッグすると移動スティックが指の位置に出現、右半分のドラッグで視点操作、
     右下のボタン列(ダッシュ/しゃがむ/アクション)に対応。
+    校舎の廊下にある光る看板つきの階段(⬆2階へ／⬆3階へ)に近づいてEを押すと上の階へ行けます。
+    今いる階は画面左上に常時表示されます。
   </div>
 </div>
 
@@ -43,7 +45,7 @@
   <div id="topbar">
     <div>
       <div id="clockbox">Day <b id="dayNum">1</b> ／ <b id="clockTxt">8:00</b>　<span id="periodTxt"></span>
-        <div id="roomlabel">現在地: ―</div></div>
+        <div id="roomlabel"><span id="floorBadge">1F</span><span id="roomlabelTxt">現在地: ―</span></div></div>
     </div>
     <div id="meters">
       <div class="meter">好感度<div class="bar"><div class="fill aff" id="fillAff"></div></div><span id="txtAff">0</span></div>

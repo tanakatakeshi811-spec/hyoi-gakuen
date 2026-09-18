@@ -35,7 +35,9 @@ label.optlbl{font-size:12px;color:#bcb2de;display:block;margin:8px 0 4px}
   align-items:flex-start;gap:8px;flex-wrap:wrap}
 #clockbox{background:#100c1cd0;border:1px solid #5a4a8a;border-radius:8px;padding:6px 12px;font-size:13px;min-width:150px}
 #clockbox b{color:#ffe066}
-#roomlabel{font-size:11px;color:#b6aee0;margin-top:2px}
+#roomlabel{font-size:13px;font-weight:600;color:#d9cdfa;margin-top:3px}
+#floorBadge{display:inline-block;background:#8fd6ff;color:#0d0a17;font-weight:800;
+  border-radius:5px;padding:1px 6px;margin-right:6px;font-size:12px}
 #meters{display:flex;flex-direction:column;gap:4px;background:#100c1cd0;border:1px solid #5a4a8a;
   border-radius:8px;padding:6px 10px;min-width:190px}
 .meter{display:flex;align-items:center;gap:6px;font-size:11px}
